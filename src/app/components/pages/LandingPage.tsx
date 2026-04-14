@@ -16,7 +16,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       priceLabel: p.price != null ? `$${p.price}` : `${p.matchScore}% match`,
       rating: p.rating,
       reviews: p.reviews,
-      skinTypes: p.skinTypes,
+      skinTypes: p.benefits.length > 0 ? p.benefits.slice(0, 2) : [p.categoryLabel],
       image: p.image
     }));
 
