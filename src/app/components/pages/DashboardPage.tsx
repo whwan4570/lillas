@@ -18,14 +18,15 @@ interface DashboardPageProps {
   onNavigate: (page: string) => void;
 }
 
-const FOLLOWING_STORAGE_KEY = 'lillas_community_following';
+const FOLLOWING_STORAGE_KEY = 'lillasy_community_following';
 
 export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [selectedTab, setSelectedTab] = useState('saved');
   const [followingAuthorIds, setFollowingAuthorIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
-      return JSON.parse(window.localStorage.getItem(FOLLOWING_STORAGE_KEY) ?? '[]') as string[];
+      const raw = window.localStorage.getItem(FOLLOWING_STORAGE_KEY) ?? '[]';
+      return JSON.parse(raw) as string[];
     } catch {
       return [];
     }

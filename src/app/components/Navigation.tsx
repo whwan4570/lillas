@@ -30,7 +30,7 @@ export function Navigation({ onNavigate, currentPage }: NavigationProps) {
               <div className="w-6 h-6 rounded-full bg-card" />
             </div>
             <span className="text-2xl tracking-tight" style={{ fontFamily: 'var(--font-serif)' }}>
-              lillas
+              lillasy
             </span>
           </button>
 

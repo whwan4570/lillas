@@ -9,14 +9,15 @@ interface CommunityPageProps {
   skinTestAnswers: SkinTestAnswers;
 }
 
-const FOLLOWING_STORAGE_KEY = 'lillas_community_following';
+const FOLLOWING_STORAGE_KEY = 'lillasy_community_following';
 
 export function CommunityPage({ onNavigate, skinTestAnswers }: CommunityPageProps) {
   const [selectedFilter, setSelectedFilter] = useState('for-you');
   const [followingAuthorIds, setFollowingAuthorIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
-      return JSON.parse(window.localStorage.getItem(FOLLOWING_STORAGE_KEY) ?? '[]') as string[];
+      const raw = window.localStorage.getItem(FOLLOWING_STORAGE_KEY) ?? '[]';
+      return JSON.parse(raw) as string[];
     } catch {
       return [];
     }
@@ -105,7 +106,7 @@ export function CommunityPage({ onNavigate, skinTestAnswers }: CommunityPageProp
     {
       id: 5,
       authorId: 'brand-partner-1',
-      author: 'lillas Partner',
+      author: 'lillasy Partner',
       avatar: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?w=100&h=100&fit=crop',
       skinType: 'Brand',
       timeAgo: 'Sponsored',

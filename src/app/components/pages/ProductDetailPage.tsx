@@ -48,10 +48,12 @@ export function ProductDetailPage({
     rating: product.rating,
     reviews: product.reviews,
     ingredients: [...product.keyIngredients, ...product.cautionIngredients].map((x) => x.toLowerCase()),
-    benefits: product.benefits
+    benefits: product.benefits,
+    tags: [product.category, ...product.benefits]
   };
   const scored = scoreProduct(engineProduct, ingredientMap, userProfile);
   const explanation = explainProduct(engineProduct, ingredientMap, userProfile);
+  const hasCoreProfile = Object.values(userProfile.skinWeights).some((weight) => weight > 0) || Object.keys(userProfile.concernWeights).length > 0;
   const topSkinType = Object.entries(userProfile.skinWeights).find(([, w]) => w > 0.5)?.[0] ?? '';
   const topConcern = Object.entries(userProfile.concernWeights).find(([, w]) => w > 0.5)?.[0] ?? '';
   const recommendationReason =
@@ -121,6 +123,9 @@ export function ProductDetailPage({
                 <div className="text-2xl text-primary" style={{ fontFamily: 'var(--font-serif)' }}>
                   {scored.finalScore.toFixed(2)}
                 </div>
+                {!hasCoreProfile && (
+                  <div className="text-xs text-amber-700 mt-1">Retake Skin Test to personalize this score.</div>
+                )}
               </div>
             </div>
 

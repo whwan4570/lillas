@@ -35,6 +35,7 @@ export interface IngredientMeta {
 export interface ScoreBreakdown {
   skinTypeScore: number;
   concernScore: number;
+  tagScore: number;
   sensitivityScore: number;
   reviewScore: number;
   preferredIngredientScore: number;
@@ -172,6 +173,26 @@ export function computeReviewScore(product: Product) {
   return (ratingNorm * 0.7 + reviewsNorm * 0.3) * 2;
 }
 
+export function computeTagScore(product: Product, user: UserProfile) {
+  const normalized = new Set<string>();
+  for (const tag of product.tags ?? []) normalized.add(tag.toLowerCase());
+  normalized.add(product.category.toLowerCase());
+
+  let score = 0;
+  const topSkinType = Object.entries(user.skinWeights).find(([, weight]) => weight >= 0.8)?.[0];
+  if (topSkinType) {
+    if (normalized.has(topSkinType)) score += 1.5;
+    if (normalized.has(`${topSkinType}-skin`)) score += 1.5;
+    if (topSkinType === 'sensitive' && (normalized.has('soothing') || normalized.has('barrier'))) score += 0.75;
+  }
+
+  for (const concern of Object.keys(user.concernWeights)) {
+    if (normalized.has(concern)) score += 1.2;
+  }
+
+  return Math.min(score, 4);
+}
+
 export function scoreProduct(
   product: Product,
   ingredientMap: Record<string, IngredientMeta>,
@@ -179,6 +200,7 @@ export function scoreProduct(
 ) {
   const skinTypeScore = computeSkinTypeScore(product, ingredientMap, user);
   const concernScore = computeConcernScore(product, ingredientMap, user);
+  const tagScore = computeTagScore(product, user);
   const sensitivityPenalty = computeSensitivityPenalty(product, ingredientMap, user);
   const pref = computeIngredientPreferenceScore(product, user);
   const budgetScore = computeBudgetScore(product.price, user.budget);
@@ -187,13 +209,14 @@ export function scoreProduct(
   const sensitivityScore = Math.max(0, 2 - sensitivityPenalty);
 
   const finalScore =
-    skinTypeScore * 0.3 +
-    concernScore * 0.25 +
-    sensitivityScore * 0.2 +
+    skinTypeScore * 0.28 +
+    concernScore * 0.22 +
+    tagScore * 0.18 +
+    sensitivityScore * 0.12 +
     reviewScore * 0.1 +
-    pref.score * 0.1 +
-    brandScore * 0.05 +
-    budgetScore * 0.1 -
+    pref.score * 0.04 +
+    brandScore * 0.02 +
+    budgetScore * 0.08 -
     pref.penalty;
 
   return {
@@ -201,6 +224,7 @@ export function scoreProduct(
     breakdown: {
       skinTypeScore,
       concernScore,
+      tagScore,
       sensitivityScore,
       reviewScore,
       preferredIngredientScore: pref.score,

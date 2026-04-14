@@ -10,8 +10,8 @@ import { DashboardPage } from './components/pages/DashboardPage';
 import type { SkinTestAnswers } from './types';
 import { buildUserProfile, type UserProfile } from '../lib/recommendationEngine';
 
-const SAVED_PRODUCTS_KEY = 'lillas_saved_products';
-const SKIN_TEST_ANSWERS_KEY = 'lillas_skin_test_answers';
+const SAVED_PRODUCTS_KEY = 'lillasy_saved_products';
+const SKIN_TEST_ANSWERS_KEY = 'lillasy_skin_test_answers';
 
 const defaultSkinProfile: SkinTestAnswers = {
   skinType: '',

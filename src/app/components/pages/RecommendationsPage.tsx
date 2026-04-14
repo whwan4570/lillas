@@ -46,7 +46,7 @@ function toEngineProduct(product: SeedCatalogProduct): Product {
     reviews: product.reviews,
     ingredients,
     benefits: product.benefits,
-    tags: [product.category]
+    tags: [product.category, ...product.benefits]
   };
 }
 
@@ -61,6 +61,7 @@ export function RecommendationsPage({
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('match');
   const [detailProductId, setDetailProductId] = useState<number | null>(null);
+  const hasCoreProfile = Boolean(skinTestAnswers.skinType) || skinTestAnswers.concerns.length > 0;
 
   const products = useMemo(
     () =>
@@ -215,6 +216,11 @@ export function RecommendationsPage({
                       </div>
                     ))}
                   </div>
+                  {!hasCoreProfile && (
+                    <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                      Complete Skin Test to unlock fully personalized Final Score.
+                    </div>
+                  )}
                   <button
                     onClick={() => onNavigate('skin-test')}
                     className="w-full mt-3 text-sm text-primary hover:underline"
@@ -246,10 +252,16 @@ export function RecommendationsPage({
                           alt={product.name}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
-                        <div className="absolute top-3 left-3 px-3 py-1 bg-gradient-to-r from-primary to-sage text-white rounded-full text-sm flex items-center gap-1">
-                          <TrendingUp className="w-3 h-3" />
-                          {getMatchPercent(product.recommendation.finalScore)}% Match
-                        </div>
+                        {hasCoreProfile ? (
+                          <div className="absolute top-3 left-3 px-3 py-1 bg-gradient-to-r from-primary to-sage text-white rounded-full text-sm flex items-center gap-1">
+                            <TrendingUp className="w-3 h-3" />
+                            {getMatchPercent(product.recommendation.finalScore)}% Match
+                          </div>
+                        ) : (
+                          <div className="absolute top-3 left-3 px-3 py-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-full text-xs">
+                            Skin Test Needed
+                          </div>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -383,6 +395,7 @@ export function RecommendationsPage({
             <div className="space-y-2 text-sm mb-4">
               <div className="flex justify-between"><span>Skin Type Score</span><span>{detailProduct.recommendation.breakdown.skinTypeScore.toFixed(2)}</span></div>
               <div className="flex justify-between"><span>Concern Score</span><span>{detailProduct.recommendation.breakdown.concernScore.toFixed(2)}</span></div>
+              <div className="flex justify-between"><span>Tag/Category Score</span><span>{detailProduct.recommendation.breakdown.tagScore.toFixed(2)}</span></div>
               <div className="flex justify-between"><span>Sensitivity Score</span><span>{detailProduct.recommendation.breakdown.sensitivityScore.toFixed(2)}</span></div>
               <div className="flex justify-between"><span>Review Score</span><span>{detailProduct.recommendation.breakdown.reviewScore.toFixed(2)}</span></div>
               <div className="flex justify-between"><span>Preferred Ingredient Score</span><span>{detailProduct.recommendation.breakdown.preferredIngredientScore.toFixed(2)}</span></div>

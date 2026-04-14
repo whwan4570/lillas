@@ -167,7 +167,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               className="text-4xl lg:text-5xl mb-4"
               style={{ fontFamily: 'var(--font-serif)', fontWeight: 400 }}
             >
-              Why lillas?
+              Why lillasy?
             </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto">
               Combining AI technology with community wisdom to revolutionize your skincare journey
