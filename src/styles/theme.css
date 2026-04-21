@@ -102,6 +102,10 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-sage: var(--sage);
+  --color-rose: var(--rose);
+  --color-cream: var(--cream);
+  --color-forest: var(--forest);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-input-background: var(--input-background);
