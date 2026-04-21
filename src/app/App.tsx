@@ -312,6 +312,8 @@ export default function App() {
       if (postLoginAction) {
         postLoginAction();
         setPostLoginAction(null);
+      } else if (payload.mode === 'signup') {
+        setCurrentPage('skin-test');
       } else {
         setCurrentPage('dashboard');
       }
