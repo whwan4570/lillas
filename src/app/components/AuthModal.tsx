@@ -20,6 +20,7 @@ interface AuthModalProps {
   onClose: () => void;
   onSubmit: (payload: AuthModalSubmitPayload) => Promise<void>;
   onGoogleLogin: () => void;
+  onForgotPassword?: (email: string) => void;
 }
 
 function GoogleIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -52,7 +53,8 @@ export function AuthModal({
   defaultMode = 'login',
   onClose,
   onSubmit,
-  onGoogleLogin
+  onGoogleLogin,
+  onForgotPassword
 }: AuthModalProps) {
   const [mode, setMode] = useState<AuthMode>(defaultMode);
   const [name, setName] = useState('');
@@ -262,6 +264,17 @@ export function AuthModal({
                     required
                   />
                 </div>
+                {mode === 'login' && onForgotPassword && (
+                  <div className="flex justify-end -mt-1">
+                    <button
+                      type="button"
+                      onClick={() => onForgotPassword(email.trim())}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
                 {mode === 'signup' && (
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />

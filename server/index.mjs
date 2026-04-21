@@ -122,6 +122,14 @@ function normalizeDb(db) {
   if (!Array.isArray(db.follows)) db.follows = [];
   if (!Array.isArray(db.likes)) db.likes = [];
   if (!Array.isArray(db.comments)) db.comments = [];
+  if (!Array.isArray(db.skinTests)) db.skinTests = [];
+  if (!Array.isArray(db.passwordResetTokens)) db.passwordResetTokens = [];
+  if (!Array.isArray(db.emailVerificationTokens)) db.emailVerificationTokens = [];
+  for (const user of db.users ?? []) {
+    if (typeof user.emailVerified !== 'boolean') {
+      user.emailVerified = Boolean(user.googleSub);
+    }
+  }
   return db;
 }
 
@@ -286,8 +294,71 @@ function toUserDto(user) {
     name: user.name,
     email: user.email,
     skinType: user.skinType,
-    avatar: user.avatar
+    avatar: user.avatar,
+    emailVerified: Boolean(user.emailVerified || user.googleSub)
   };
+}
+
+const DEFAULT_SKIN_TEST = {
+  skinType: '',
+  concerns: [],
+  sensitivity: '',
+  routine: '',
+  budget: '',
+  preferredIngredients: [],
+  avoidIngredients: [],
+  preferredBrands: []
+};
+
+function sanitizeSkinTest(raw) {
+  const safeString = (v, max = 80) =>
+    typeof v === 'string' ? v.trim().slice(0, max) : '';
+  const safeStringArray = (v, maxItems = 40, maxLen = 80) => {
+    if (!Array.isArray(v)) return [];
+    return v
+      .filter((item) => typeof item === 'string')
+      .map((item) => item.trim().slice(0, maxLen))
+      .filter(Boolean)
+      .slice(0, maxItems);
+  };
+  return {
+    skinType: safeString(raw?.skinType, 60),
+    concerns: safeStringArray(raw?.concerns),
+    sensitivity: safeString(raw?.sensitivity, 60),
+    routine: safeString(raw?.routine, 60),
+    budget: safeString(raw?.budget, 40),
+    preferredIngredients: safeStringArray(raw?.preferredIngredients),
+    avoidIngredients: safeStringArray(raw?.avoidIngredients),
+    preferredBrands: safeStringArray(raw?.preferredBrands, 40, 60)
+  };
+}
+
+function getUserSkinTest(db, userId) {
+  return db.skinTests.find((row) => row.userId === userId)?.answers ?? null;
+}
+
+function generateResetToken() {
+  return randomBytes(24).toString('base64url');
+}
+
+function pruneExpiredTokens(db) {
+  const now = Date.now();
+  db.passwordResetTokens = db.passwordResetTokens.filter(
+    (entry) => Number(entry.exp) > now && !entry.usedAt
+  );
+  db.emailVerificationTokens = db.emailVerificationTokens.filter(
+    (entry) => Number(entry.exp) > now && !entry.usedAt
+  );
+}
+
+function deriveSkinType(answers) {
+  const type = (answers.skinType ?? '').trim();
+  const sensitivity = (answers.sensitivity ?? '').trim();
+  if (!type) return '';
+  const typeTitle = type.charAt(0).toUpperCase() + type.slice(1);
+  if (!sensitivity || sensitivity.toLowerCase() === 'none') return typeTitle;
+  const sensTitle = sensitivity.charAt(0).toUpperCase() + sensitivity.slice(1);
+  return `${typeTitle} · ${sensTitle}`;
 }
 
 function sanitizePage(rawPage) {
@@ -365,6 +436,7 @@ const server = createServer(async (req, res) => {
         passwordHash: hashPassword(password),
         skinType,
         avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop',
+        emailVerified: false,
         createdAt: nowIso()
       };
       db.users.push(user);
@@ -484,6 +556,154 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/user/skin-test') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    const answers = getUserSkinTest(db, authUser.id);
+    return json(res, 200, { answers: answers ?? null });
+  }
+
+  if (
+    (req.method === 'POST' || req.method === 'PATCH') &&
+    url.pathname === '/api/user/skin-test'
+  ) {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const body = await parseBody(req);
+      const answers = sanitizeSkinTest(body?.answers ?? body);
+      const row = db.skinTests.find((entry) => entry.userId === authUser.id);
+      const payload = { answers, updatedAt: nowIso() };
+      if (row) {
+        row.answers = answers;
+        row.updatedAt = payload.updatedAt;
+      } else {
+        db.skinTests.push({ userId: authUser.id, ...payload });
+      }
+      const derived = deriveSkinType(answers);
+      if (derived) authUser.skinType = derived;
+      writeDb(db);
+      return json(res, 200, { answers, user: toUserDto(authUser) });
+    } catch (error) {
+      return json(res, 400, { error: String(error.message ?? error) });
+    }
+  }
+
+  if (req.method === 'DELETE' && url.pathname === '/api/user/skin-test') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    db.skinTests = db.skinTests.filter((row) => row.userId !== authUser.id);
+    writeDb(db);
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/password/request-reset') {
+    try {
+      const body = await parseBody(req);
+      const email = String(body.email ?? '').trim().toLowerCase();
+      if (!email) return json(res, 400, { error: 'Email is required' });
+      pruneExpiredTokens(db);
+      const user = db.users.find((u) => u.email.toLowerCase() === email);
+      const response = { ok: true };
+      if (user) {
+        const resetToken = generateResetToken();
+        db.passwordResetTokens.push({
+          token: resetToken,
+          userId: user.id,
+          exp: Date.now() + 1000 * 60 * 30,
+          usedAt: null,
+          createdAt: nowIso()
+        });
+        writeDb(db);
+        const resetUrl = new URL(FRONTEND_ORIGIN);
+        resetUrl.searchParams.set('reset_token', resetToken);
+        console.log(`[password-reset] ${email} -> ${resetUrl.toString()}`);
+        if (process.env.EXPOSE_DEV_TOKENS === 'true' || TOKEN_SECRET === 'lillasy-dev-secret') {
+          response.devResetToken = resetToken;
+          response.devResetUrl = resetUrl.toString();
+        }
+      } else {
+        console.log(`[password-reset] requested for unknown email: ${email}`);
+      }
+      return json(res, 200, response);
+    } catch (error) {
+      return json(res, 400, { error: String(error.message ?? error) });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/password/reset') {
+    try {
+      const body = await parseBody(req);
+      const token = String(body.token ?? '').trim();
+      const password = String(body.password ?? '');
+      if (!token || password.length < 6) {
+        return json(res, 400, { error: 'Invalid reset payload' });
+      }
+      pruneExpiredTokens(db);
+      const entry = db.passwordResetTokens.find((r) => r.token === token && !r.usedAt);
+      if (!entry || Number(entry.exp) < Date.now()) {
+        return json(res, 400, { error: 'Reset token is invalid or expired' });
+      }
+      const user = db.users.find((u) => u.id === entry.userId);
+      if (!user) return json(res, 400, { error: 'User not found' });
+      user.passwordHash = hashPassword(password);
+      entry.usedAt = nowIso();
+      writeDb(db);
+      const authToken = signToken(user.id);
+      return json(res, 200, { token: authToken, user: toUserDto(user) });
+    } catch (error) {
+      return json(res, 400, { error: String(error.message ?? error) });
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/email/request-verify') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    pruneExpiredTokens(db);
+    if (authUser.emailVerified) {
+      return json(res, 200, { ok: true, alreadyVerified: true });
+    }
+    const verifyToken = generateResetToken();
+    db.emailVerificationTokens.push({
+      token: verifyToken,
+      userId: authUser.id,
+      exp: Date.now() + 1000 * 60 * 60 * 24,
+      usedAt: null,
+      createdAt: nowIso()
+    });
+    writeDb(db);
+    const verifyUrl = new URL(FRONTEND_ORIGIN);
+    verifyUrl.searchParams.set('verify_token', verifyToken);
+    console.log(`[email-verify] ${authUser.email} -> ${verifyUrl.toString()}`);
+    const response = { ok: true };
+    if (process.env.EXPOSE_DEV_TOKENS === 'true' || TOKEN_SECRET === 'lillasy-dev-secret') {
+      response.devVerifyToken = verifyToken;
+      response.devVerifyUrl = verifyUrl.toString();
+    }
+    return json(res, 200, response);
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/auth/email/verify') {
+    try {
+      const body = await parseBody(req);
+      const token = String(body.token ?? '').trim();
+      if (!token) return json(res, 400, { error: 'Verification token is required' });
+      pruneExpiredTokens(db);
+      const entry = db.emailVerificationTokens.find((r) => r.token === token && !r.usedAt);
+      if (!entry || Number(entry.exp) < Date.now()) {
+        return json(res, 400, { error: 'Verification token is invalid or expired' });
+      }
+      const user = db.users.find((u) => u.id === entry.userId);
+      if (!user) return json(res, 400, { error: 'User not found' });
+      user.emailVerified = true;
+      entry.usedAt = nowIso();
+      writeDb(db);
+      return json(res, 200, { user: toUserDto(user) });
+    } catch (error) {
+      return json(res, 400, { error: String(error.message ?? error) });
+    }
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/auth/google/start') {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       const failUrl = new URL(FRONTEND_ORIGIN);
@@ -550,6 +770,7 @@ const server = createServer(async (req, res) => {
           skinType: 'Not set',
           avatar: picture || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop',
           googleSub,
+          emailVerified: true,
           createdAt: nowIso()
         };
         db.users.push(user);
@@ -557,6 +778,7 @@ const server = createServer(async (req, res) => {
         user.googleSub = googleSub;
         user.name = user.name || name;
         user.avatar = user.avatar || picture;
+        user.emailVerified = true;
       }
 
       writeDb(db);

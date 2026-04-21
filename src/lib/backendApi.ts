@@ -6,6 +6,18 @@ export interface AuthUser {
   email: string;
   skinType: string;
   avatar: string;
+  emailVerified: boolean;
+}
+
+export interface SkinTestAnswersPayload {
+  skinType: string;
+  concerns: string[];
+  sensitivity: string;
+  routine: string;
+  budget: string;
+  preferredIngredients: string[];
+  avoidIngredients: string[];
+  preferredBrands: string[];
 }
 
 export interface ProductAttachment {
@@ -178,5 +190,53 @@ export async function toggleFollow(token: string, authorId: string) {
   return apiRequest<{ followingAuthorIds: string[] }>(`/community/follow/${encodeURIComponent(authorId)}`, {
     method: 'POST',
     token
+  });
+}
+
+export async function getSkinTest(token: string) {
+  return apiRequest<{ answers: SkinTestAnswersPayload | null }>('/user/skin-test', { token });
+}
+
+export async function saveSkinTest(token: string, answers: SkinTestAnswersPayload) {
+  return apiRequest<{ answers: SkinTestAnswersPayload; user: AuthUser }>('/user/skin-test', {
+    method: 'POST',
+    token,
+    body: { answers }
+  });
+}
+
+export async function requestPasswordReset(email: string) {
+  return apiRequest<{ ok: true; devResetToken?: string; devResetUrl?: string }>(
+    '/auth/password/request-reset',
+    {
+      method: 'POST',
+      body: { email }
+    }
+  );
+}
+
+export async function resetPassword(token: string, password: string) {
+  return apiRequest<{ token: string; user: AuthUser }>('/auth/password/reset', {
+    method: 'POST',
+    body: { token, password }
+  });
+}
+
+export async function requestEmailVerify(token: string) {
+  return apiRequest<{
+    ok: true;
+    alreadyVerified?: boolean;
+    devVerifyToken?: string;
+    devVerifyUrl?: string;
+  }>('/auth/email/request-verify', {
+    method: 'POST',
+    token
+  });
+}
+
+export async function verifyEmail(verifyToken: string) {
+  return apiRequest<{ user: AuthUser }>('/auth/email/verify', {
+    method: 'POST',
+    body: { token: verifyToken }
   });
 }

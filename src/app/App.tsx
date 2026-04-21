@@ -10,15 +10,19 @@ import { DashboardPage } from './components/pages/DashboardPage';
 import { FollowingManagePage } from './components/pages/FollowingManagePage';
 import { AuthModal } from './components/AuthModal';
 import { ProfileEditModal } from './components/ProfileEditModal';
+import { PasswordResetModal } from './components/PasswordResetModal';
+import { EmailVerificationBanner } from './components/EmailVerificationBanner';
 import type { SkinTestAnswers } from './types';
 import { buildUserProfile, type UserProfile } from '../lib/recommendationEngine';
 import {
   getMe,
   getRecentProducts,
   getSavedProducts,
+  getSkinTest,
   login,
   recordRecentProduct,
   register,
+  saveSkinTest,
   setSavedProducts as apiSetSavedProducts,
   updateMe,
   type AuthUser
@@ -91,8 +95,14 @@ export default function App() {
   const [isProfileSubmitting, setIsProfileSubmitting] = useState(false);
   const [profileModalError, setProfileModalError] = useState<string | null>(null);
 
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetInitialToken, setResetInitialToken] = useState<string | null>(null);
+  const [resetDefaultEmail, setResetDefaultEmail] = useState<string>('');
+  const [pendingVerifyToken, setPendingVerifyToken] = useState<string | null>(null);
+
   const savedHydratedRef = useRef(false);
   const recentHydratedRef = useRef(false);
+  const skinTestHydratedRef = useRef(false);
 
   useEffect(() => {
     window.localStorage.setItem(SAVED_PRODUCTS_KEY, JSON.stringify(savedProductIds));
@@ -120,6 +130,7 @@ export default function App() {
       setAuthUser(null);
       savedHydratedRef.current = false;
       recentHydratedRef.current = false;
+      skinTestHydratedRef.current = false;
       return;
     }
     getMe(authToken)
@@ -170,12 +181,49 @@ export default function App() {
   }, [savedProductIds, authToken]);
 
   useEffect(() => {
+    if (!authToken) return;
+    let cancelled = false;
+    skinTestHydratedRef.current = false;
+    getSkinTest(authToken)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.answers) {
+          setSkinTestAnswers({ ...defaultSkinProfile, ...result.answers });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) skinTestHydratedRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken]);
+
+  useEffect(() => {
+    if (!authToken || !skinTestHydratedRef.current) return;
+    if (!skinTestAnswers.skinType && skinTestAnswers.concerns.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void saveSkinTest(authToken, skinTestAnswers)
+        .then((result) => {
+          if (result.user) setAuthUser(result.user);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [skinTestAnswers, authToken]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const callbackToken = params.get('auth_token');
     const callbackError = params.get('auth_error');
     const callbackPage = params.get('page');
-    if (!callbackToken && !callbackError) return;
+    const resetToken = params.get('reset_token');
+    const verifyToken = params.get('verify_token');
+    const hasAnyParam =
+      callbackToken || callbackError || resetToken || verifyToken;
+    if (!hasAnyParam) return;
 
     if (callbackToken) {
       setAuthToken(callbackToken);
@@ -184,6 +232,13 @@ export default function App() {
     if (callbackError) {
       setAuthModalError(callbackError);
       setIsAuthModalOpen(true);
+    }
+    if (resetToken) {
+      setResetInitialToken(resetToken);
+      setIsResetModalOpen(true);
+    }
+    if (verifyToken) {
+      setPendingVerifyToken(verifyToken);
     }
 
     const cleanUrl = `${window.location.origin}${window.location.pathname}`;
@@ -361,6 +416,13 @@ export default function App() {
     }
   };
 
+  const openResetModal = (email: string) => {
+    setResetInitialToken(null);
+    setResetDefaultEmail(email);
+    setIsResetModalOpen(true);
+    setIsAuthModalOpen(false);
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navigation
@@ -371,6 +433,13 @@ export default function App() {
         onLogout={handleLogout}
         onSelectProduct={handleSelectProduct}
       />
+      <EmailVerificationBanner
+        authToken={authToken}
+        authUser={authUser}
+        onVerified={(user) => setAuthUser(user)}
+        pendingVerifyToken={pendingVerifyToken}
+        onVerifyTokenConsumed={() => setPendingVerifyToken(null)}
+      />
       {renderPage()}
       <AuthModal
         isOpen={isAuthModalOpen}
@@ -379,6 +448,7 @@ export default function App() {
         errorMessage={authModalError}
         onClose={() => setIsAuthModalOpen(false)}
         onSubmit={handleAuthSubmit}
+        onForgotPassword={openResetModal}
         onGoogleLogin={() => {
           const targetPage = currentPage && currentPage !== 'home' ? currentPage : 'dashboard';
           const current = encodeURIComponent(targetPage);
@@ -392,6 +462,21 @@ export default function App() {
         errorMessage={profileModalError}
         onClose={() => setIsProfileModalOpen(false)}
         onSubmit={handleProfileSubmit}
+      />
+      <PasswordResetModal
+        isOpen={isResetModalOpen}
+        initialToken={resetInitialToken}
+        defaultEmail={resetDefaultEmail}
+        onClose={() => {
+          setIsResetModalOpen(false);
+          setResetInitialToken(null);
+        }}
+        onSuccess={(authToken) => {
+          setAuthToken(authToken);
+          setIsResetModalOpen(false);
+          setResetInitialToken(null);
+          setCurrentPage('dashboard');
+        }}
       />
     </div>
   );
