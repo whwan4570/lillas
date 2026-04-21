@@ -61,7 +61,6 @@ export function AuthModal({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [skinType, setSkinType] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -72,7 +71,6 @@ export function AuthModal({
     setEmail('');
     setPassword('');
     setConfirmPassword('');
-    setSkinType('');
   }, [defaultMode, isOpen]);
 
   useEffect(() => {
@@ -115,7 +113,7 @@ export function AuthModal({
       name: name.trim() || 'New User',
       email: normalizedEmail,
       password,
-      skinType: skinType.trim() || 'Not set'
+      skinType: 'Not set'
     });
   };
 
@@ -213,32 +211,16 @@ export function AuthModal({
 
               <form onSubmit={submit} className="space-y-3">
                 {mode === 'signup' && (
-                  <>
-                    <div className="relative">
-                      <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Display name"
-                        className={inputClass}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <div className="relative">
-                        <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <input
-                          value={skinType}
-                          onChange={(e) => setSkinType(e.target.value)}
-                          placeholder="Skin type (optional — e.g. Dry · Sensitive)"
-                          className={inputClass}
-                        />
-                      </div>
-                      <p className="text-[11px] text-muted-foreground mt-1 ml-1">
-                        Leave blank to set later via the Skin Test.
-                      </p>
-                    </div>
-                  </>
+                  <div className="relative">
+                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Display name"
+                      className={inputClass}
+                      required
+                    />
+                  </div>
                 )}
 
                 <div className="relative">
