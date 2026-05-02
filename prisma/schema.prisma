@@ -1,0 +1,159 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  passwordHash  String
+  skinType      String
+  avatar        String
+  emailVerified Boolean  @default(false)
+  googleSub     String?  @unique
+  createdAt     DateTime @default(now())
+}
+
+model Post {
+  id                     Int      @id
+  authorId               String
+  title                  String
+  content                String
+  imagesJson             String   @default("[]")
+  tagsJson               String   @default("[]")
+  sponsored              Boolean  @default(false)
+  productAttachmentsJson String   @default("[]")
+  createdAt              DateTime @default(now())
+}
+
+model Comment {
+  id        Int      @id
+  postId    Int
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model Like {
+  postId Int
+  userId String
+
+  @@id([postId, userId])
+}
+
+model Follow {
+  followerId  String
+  followingId String
+
+  @@id([followerId, followingId])
+}
+
+model SavedProduct {
+  userId         String @id
+  productIdsJson String @default("[]")
+}
+
+model RecentProduct {
+  userId         String @id
+  productIdsJson String @default("[]")
+}
+
+model SkinTest {
+  userId    String   @id
+  answersJson String
+  updatedAt DateTime @updatedAt
+}
+
+model PasswordResetToken {
+  token     String  @id
+  userId    String
+  exp       BigInt
+  usedAt    String?
+  createdAt String
+}
+
+model EmailVerificationToken {
+  token     String  @id
+  userId    String
+  exp       BigInt
+  usedAt    String?
+  createdAt String
+}
+
+model Counter {
+  key   String @id
+  value Int
+}
+
+model ImportedProduct {
+  id                     Int      @id @default(autoincrement())
+  source                 String
+  sourceItemId           String   @unique
+  name                   String?
+  brand                  String?
+  priceAmount            Float?
+  priceCurrency          String?
+  priceMinAmount         Float?
+  priceMaxAmount         Float?
+  autoReplenishPriceAmount Float?
+  ratingValue            Float?
+  reviewCount            Int?
+  questionCount          Int?
+  lovesCount             Int?
+  recommendedPercent     Int?
+  prosMentionedJson      String   @default("[]")
+  consMentionedJson      String   @default("[]")
+  size                   String?
+  imageLabelsJson        String   @default("[]")
+  imageUrlsJson          String   @default("[]")
+  highlightsJson         String   @default("[]")
+  exclusiveLabel         String?
+  whatItIs               String?
+  skinTypesJson          String   @default("[]")
+  skincareConcernsJson   String   @default("[]")
+  formulation            String?
+  highlightedJson        String   @default("[]")
+  ingredientCalloutsJson String   @default("[]")
+  whatElse               String?
+  clinicalResultsJson    String   @default("[]")
+  cleanAtSephora         String?
+  ingredientsText        String?
+  inciIngredientsJson    String   @default("[]")
+  sourceUrl              String?
+  rawText                String
+  crawledAt              DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model SephoraTarget {
+  id           Int      @id @default(autoincrement())
+  sourceItemId String   @unique
+  sourceUrl    String?
+  label        String?
+  enabled      Boolean  @default(true)
+  lastCrawledAt DateTime?
+  lastStatus   String?
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model CrawlerRun {
+  id             Int       @id @default(autoincrement())
+  source         String
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+  status         String
+  trigger        String
+  processed      Int       @default(0)
+  succeeded      Int       @default(0)
+  failed         Int       @default(0)
+  errorMessage   String?
+}

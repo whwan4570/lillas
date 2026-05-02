@@ -13,6 +13,10 @@ interface PasswordResetModalProps {
 
 type Stage = 'request' | 'confirm';
 
+function isValidPassword(password: string) {
+  return password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
+}
+
 export function PasswordResetModal({
   isOpen,
   initialToken,
@@ -63,9 +67,7 @@ export function PasswordResetModal({
     setDevLink(null);
     try {
       const result = await requestPasswordReset(email.trim());
-      setMessage(
-        'If an account matches that email, a reset link has been generated. In this dev build you can use the link below.'
-      );
+      setMessage('If an account matches that email, a reset link has been generated.');
       if (result.devResetToken) {
         setToken(result.devResetToken);
       }
@@ -84,8 +86,8 @@ export function PasswordResetModal({
     event.preventDefault();
     setError(null);
     setMessage(null);
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (!isValidPassword(password)) {
+      setError('Password must be at least 8 characters and include one letter and one number.');
       return;
     }
     if (password !== confirmPassword) {

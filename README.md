@@ -8,4 +8,151 @@
   Run `npm i` to install the dependencies.
 
   Run `npm run dev` to start the development server.
+
+  Run `npm run dev:server` to start the backend (also boots the Sephora scheduler when enabled).
+
+  ## Sephora live crawler
+
+  The backend ships with a Sephora product crawler that fetches a product page,
+  parses the embedded `__NEXT_DATA__` and JSON-LD blocks, and upserts the result
+  into the `ImportedProduct` table. The same data set powers the existing text
+  importer, so live and text-imported products land in one place.
+
+  ### One-time setup
+
+  1. Copy `.env.example` to `.env` and adjust values.
+  2. Set `SEPHORA_CRAWLER_ENABLED=true` to let the in-process scheduler run a
+     refresh once every `SEPHORA_CRAWLER_INTERVAL_HOURS` (default `24`).
+  3. Add the Sephora products you want to track (an admin token is required —
+     it's the same auth token returned by `/api/auth/login`).
+
+     ```bash
+     curl -X POST http://localhost:8787/api/admin/sephora/targets \
+       -H "Authorization: Bearer $TOKEN" \
+       -H "Content-Type: application/json" \
+       -d '{"sourceItemId":"2773299","label":"Supergoop! Mineral Unseen SPF 40"}'
+     ```
+
+     You may also pass `sourceUrl` (a full Sephora product URL containing
+     `/P<id>`) instead of `sourceItemId`; the API will derive the id for you.
+
+  ### Triggering crawls
+
+  - **Automatic (recommended).** Start the backend with `npm run dev:server`.
+    When `SEPHORA_CRAWLER_ENABLED=true` the scheduler polls every 5 minutes,
+    detects whether 24 hours have passed since the last successful run, and
+    refreshes every enabled target.
+  - **Manual via API:** `POST /api/admin/sephora/run` — runs immediately and
+    returns a summary of processed/succeeded/failed counts.
+  - **CLI / cron / Windows Task Scheduler:** `npm run crawl:sephora` runs the
+    same pipeline in a one-shot process. Useful when you prefer an external
+    scheduler over the in-process one.
+
+  ### Inspecting status
+
+  - `GET /api/admin/sephora/targets` — list configured targets and their last
+    crawl status.
+  - `GET /api/admin/sephora/runs?limit=20` — last crawler runs (status,
+    processed/succeeded/failed counts, error message if any).
+  - `GET /api/admin/imported-products` — the catalog itself; freshly crawled
+    items expose a `crawledAt` timestamp.
+
+  ### Choosing a fetcher (Akamai bypass)
+
+  Sephora's product pages are protected by Akamai BotManager — direct Node
+  `fetch` requests are answered with `403 Access Denied` plus a JavaScript
+  challenge that only a real browser can run. The crawler ships with two
+  fetchers; pick one with the `SEPHORA_FETCHER` env var.
+
+  | `SEPHORA_FETCHER` | What it does | When to use |
+  |---|---|---|
+  | `fetch` (default) | Plain `fetch()` with browser-like headers | Local mocks / sources that don't have anti-bot |
+  | `playwright` | Headless Chromium that runs the Akamai challenge | The only path that actually works against live `sephora.com` |
+
+  One-time setup for the Playwright fetcher:
+
+  ```bash
+  pnpm add -D playwright
+  npx playwright install chromium
+  ```
+
+  Then enable it via env:
+
+  ```bash
+  SEPHORA_FETCHER=playwright npm run crawl:sephora
+  ```
+
+  The Playwright fetcher reuses a single Chromium instance for the whole run
+  (faster, lower memory). If Chromium itself is detected as a bot (Akamai
+  sometimes targets headless fingerprints or specific IP ranges), the crawler
+  reports `bot_challenge` cleanly instead of saving garbage data.
+
+  When the default `chromium` headless build still gets blocked, try in order:
+
+  | Env var | Effect |
+  |---|---|
+  | `SEPHORA_PLAYWRIGHT_HEADLESS=false` | Pops a visible browser window — much harder for Akamai to fingerprint |
+  | `SEPHORA_PLAYWRIGHT_CHANNEL=chrome` | Uses locally installed real Chrome instead of bundled Chromium |
+  | `SEPHORA_PLAYWRIGHT_PROXY=http://user:pass@host:port` | Routes traffic through a residential proxy (datacenter/VPN IPs are usually pre-flagged) |
+
+  Sephora's BotManager is aggressive against datacenter/VPN IPs and known
+  headless fingerprints, so a clean residential IP + headed real Chrome is
+  usually required for sustained crawling.
+
+  ### Connecting to Supabase (Postgres)
+
+  The default storage is a local SQLite file (`dev.db`). To use Supabase
+  Postgres instead:
+
+  1. Create a Supabase project. From **Project Settings → Database** copy:
+     - **Pooler** (Transaction mode) connection string → `DATABASE_URL`
+     - **Direct** connection string → `DIRECT_URL`
+  2. In `.env`:
+
+     ```
+     DATABASE_URL="postgresql://postgres.<ref>:<pwd>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1"
+     DIRECT_URL="postgresql://postgres.<ref>:<pwd>@aws-0-<region>.pooler.supabase.com:5432/postgres"
+     ```
+
+  3. In `prisma/schema.prisma`, change the datasource:
+
+     ```prisma
+     datasource db {
+       provider  = "postgresql"
+       url       = env("DATABASE_URL")
+       directUrl = env("DIRECT_URL")
+     }
+     ```
+
+  4. Generate the client and push the schema:
+
+     ```bash
+     pnpm prisma generate
+     pnpm prisma db push
+     ```
+
+  All crawler-related data access (`ImportedProduct`, `SephoraTarget`,
+  `CrawlerRun`) goes through the Prisma model API and runs on either provider.
+  The legacy `ensureSqlSchema()` bootstrap (which uses SQLite-specific raw SQL)
+  automatically becomes a no-op when `DATABASE_URL` is Postgres — Prisma's
+  `db push` is responsible for creating those tables on Supabase.
+
+  ### Etiquette and safety
+
+  Sephora does not publish a public crawling API and uses anti-bot protection.
+  The crawler ships with conservative defaults to stay polite, but **you are
+  responsible** for reviewing Sephora's Terms of Service and `robots.txt`
+  before enabling it for your account or environment:
+
+  - Sequential requests (no concurrency) with a `requestDelayMs` gap (default
+    `2500ms`) between targets.
+  - Browser-like `User-Agent` and headers; configurable via `SEPHORA_USER_AGENT`.
+  - Exponential backoff on `429`/`503` responses and timeouts.
+  - Bot-challenge detection (`captcha`, `Akamai`, `Pardon our interruption`)
+    surfaces a clear `bot_challenge` error instead of writing garbage data.
+  - Failures are recorded per target (`lastStatus`, `lastError`) and per run
+    (`CrawlerRun` table) so you can audit what happened.
+
+  Keep the target list small (start with a handful of products), monitor the
+  `CrawlerRun` rows, and back off if Sephora blocks the requests.
   

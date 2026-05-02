@@ -1,291 +1,57 @@
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { pbkdf2Sync, randomBytes, timingSafeEqual, createHmac } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { config } from './config.mjs';
+import {
+  deleteSephoraTarget,
+  ensureDb,
+  listImportedProducts,
+  listSephoraTargets,
+  nowIso,
+  readDb,
+  upsertImportedProduct,
+  upsertSephoraTarget,
+  writeDb
+} from './dbStore.mjs';
+import { json, parseBody, redirect } from './http.mjs';
+import { parseSephoraProductText } from './productImport.mjs';
+import { listRecentSephoraRuns, runSephoraCrawl } from './sephoraRunner.mjs';
+import { startSephoraScheduler } from './sephoraScheduler.mjs';
+import {
+  generateResetToken,
+  hashPassword,
+  makeOAuthState,
+  readOAuthState,
+  signToken,
+  verifyPassword,
+  verifyToken
+} from './security.mjs';
+import {
+  commentSchema,
+  createPostSchema,
+  loginSchema,
+  parseOrThrow,
+  passwordResetRequestSchema,
+  passwordResetSchema,
+  recentProductSchema,
+  registerSchema,
+  restoreBackupSchema,
+  savedProductsSchema,
+  sephoraCrawlOptionsSchema,
+  sephoraTargetSchema,
+  sephoraTextImportSchema,
+  skinTestAnswersSchema,
+  updateMeSchema,
+  verifyEmailSchema
+} from './validation.mjs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-function loadEnvFromFile() {
-  const envPath = join(__dirname, '..', '.env');
-  if (!existsSync(envPath)) return;
-  const raw = readFileSync(envPath, 'utf8');
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx <= 0) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    const value = trimmed.slice(eqIdx + 1).trim();
-    if (!process.env[key]) process.env[key] = value;
-  }
-}
-
-loadEnvFromFile();
-
-const DB_PATH = join(__dirname, 'db.json');
-const PORT = Number(process.env.PORT ?? 8787);
-const TOKEN_SECRET = process.env.TOKEN_SECRET ?? 'lillasy-dev-secret';
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173';
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID ?? '';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET ?? '';
-const GOOGLE_REDIRECT_URI =
-  process.env.GOOGLE_REDIRECT_URI ?? `http://localhost:${PORT}/api/auth/google/callback`;
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function seedData() {
-  return {
-    users: [
-      {
-        id: 'sarah-kim',
-        name: 'Sarah Kim',
-        email: 'sarah@lillasy.com',
-        passwordHash: hashPassword('demo1234'),
-        skinType: 'Dry · Sensitive',
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop',
-        createdAt: nowIso()
-      },
-      {
-        id: 'emma-chen',
-        name: 'Emma Chen',
-        email: 'emma@lillasy.com',
-        passwordHash: hashPassword('demo1234'),
-        skinType: 'Combination · Acne-Prone',
-        avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop',
-        createdAt: nowIso()
-      },
-      {
-        id: 'jessica-park',
-        name: 'Jessica Park',
-        email: 'jessica@lillasy.com',
-        passwordHash: hashPassword('demo1234'),
-        skinType: 'Oily · Large Pores',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop',
-        createdAt: nowIso()
-      },
-      {
-        id: 'mia-rodriguez',
-        name: 'Mia Rodriguez',
-        email: 'mia@lillasy.com',
-        passwordHash: hashPassword('demo1234'),
-        skinType: 'Sensitive · Rosacea',
-        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop',
-        createdAt: nowIso()
-      }
-    ],
-    posts: [
-      {
-        id: 1,
-        authorId: 'sarah-kim',
-        title: 'My 3-month glow-up journey with hydrating essences',
-        content:
-          "After struggling with dehydrated skin for years, I finally found the perfect routine. The key was layering multiple hydrating products and being consistent.",
-        images: [
-          'https://images.unsplash.com/photo-1612817288484-6f916006741a?w=400&h=400&fit=crop',
-          'https://images.unsplash.com/photo-1616394584738-fc6e612e71b9?w=400&h=400&fit=crop'
-        ],
-        tags: ['Hydration', 'Before & After', 'Dry Skin'],
-        sponsored: false,
-        productAttachments: [],
-        createdAt: nowIso()
-      },
-      {
-        id: 2,
-        authorId: 'emma-chen',
-        title: 'Vitamin C serums: Which one is actually worth it?',
-        content:
-          "I've tested 12 different vitamin C serums over the past year. Here's my honest breakdown of which ones delivered results.",
-        images: ['https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?w=600&h=400&fit=crop'],
-        tags: ['Vitamin C', 'Product Review', 'Brightening'],
-        sponsored: false,
-        productAttachments: [],
-        createdAt: nowIso()
-      }
-    ],
-    follows: [],
-    likes: [],
-    comments: [],
-    savedProducts: [],
-    recentProducts: [],
-    nextPostId: 3,
-    nextCommentId: 1
-  };
-}
-
-function normalizeDb(db) {
-  if (!Array.isArray(db.savedProducts)) db.savedProducts = [];
-  if (!Array.isArray(db.recentProducts)) db.recentProducts = [];
-  if (!Array.isArray(db.follows)) db.follows = [];
-  if (!Array.isArray(db.likes)) db.likes = [];
-  if (!Array.isArray(db.comments)) db.comments = [];
-  if (!Array.isArray(db.skinTests)) db.skinTests = [];
-  if (!Array.isArray(db.passwordResetTokens)) db.passwordResetTokens = [];
-  if (!Array.isArray(db.emailVerificationTokens)) db.emailVerificationTokens = [];
-  for (const user of db.users ?? []) {
-    if (typeof user.emailVerified !== 'boolean') {
-      user.emailVerified = Boolean(user.googleSub);
-    }
-  }
-  return db;
-}
-
-function ensureDb() {
-  if (!existsSync(__dirname)) mkdirSync(__dirname, { recursive: true });
-  if (!existsSync(DB_PATH)) writeFileSync(DB_PATH, JSON.stringify(seedData(), null, 2), 'utf8');
-}
-
-function readDb() {
-  ensureDb();
-  return normalizeDb(JSON.parse(readFileSync(DB_PATH, 'utf8')));
-}
-
-function writeDb(db) {
-  writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf8');
-}
-
-function hashPassword(password) {
-  const salt = randomBytes(16).toString('hex');
-  const hash = pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-  return `${salt}:${hash}`;
-}
-
-function verifyPassword(password, stored) {
-  const [salt, hash] = String(stored ?? '').split(':');
-  if (!salt || !hash) return false;
-  const attempt = pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-  const left = Buffer.from(hash, 'hex');
-  const right = Buffer.from(attempt, 'hex');
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-function signToken(userId) {
-  const exp = Date.now() + 1000 * 60 * 60 * 24 * 7;
-  const payload = `${userId}.${exp}`;
-  const signature = createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
-  return Buffer.from(`${payload}.${signature}`).toString('base64url');
-}
-
-function verifyToken(token) {
-  try {
-    const raw = Buffer.from(token, 'base64url').toString('utf8');
-    const [userId, expStr, signature] = raw.split('.');
-    if (!userId || !expStr || !signature) return null;
-    const payload = `${userId}.${expStr}`;
-    const expected = createHmac('sha256', TOKEN_SECRET).update(payload).digest('hex');
-    if (expected !== signature) return null;
-    if (Number(expStr) < Date.now()) return null;
-    return userId;
-  } catch {
-    return null;
-  }
-}
-
-function makeOAuthState(page = 'dashboard') {
-  const exp = Date.now() + 1000 * 60 * 10;
-  const nonce = randomBytes(8).toString('hex');
-  const payload = JSON.stringify({ page, exp, nonce });
-  const payloadEncoded = Buffer.from(payload, 'utf8').toString('base64url');
-  const signature = createHmac('sha256', TOKEN_SECRET).update(payloadEncoded).digest('hex');
-  return `${payloadEncoded}.${signature}`;
-}
-
-function readOAuthState(state) {
-  if (!state || !state.includes('.')) return null;
-  const [payloadEncoded, signature] = state.split('.');
-  if (!payloadEncoded || !signature) return null;
-  const expected = createHmac('sha256', TOKEN_SECRET).update(payloadEncoded).digest('hex');
-  if (expected !== signature) return null;
-  try {
-    const raw = Buffer.from(payloadEncoded, 'base64url').toString('utf8');
-    const payload = JSON.parse(raw);
-    if (Number(payload.exp) < Date.now()) return null;
-    return payload;
-  } catch {
-    return null;
-  }
-}
+const DEFAULT_AVATAR =
+  'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop';
 
 function getAuthUser(req, db) {
   const header = req.headers.authorization ?? '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  const userId = verifyToken(token);
+  const userId = verifyToken(token, config.tokenSecret);
   if (!userId) return null;
-  return db.users.find((u) => u.id === userId) ?? null;
-}
-
-function json(res, statusCode, body) {
-  res.writeHead(statusCode, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS'
-  });
-  res.end(JSON.stringify(body));
-}
-
-function redirect(res, location) {
-  res.writeHead(302, { Location: location });
-  res.end();
-}
-
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = '';
-    req.on('data', (chunk) => {
-      raw += chunk;
-      if (raw.length > 12_000_000) reject(new Error('Body too large (max 12MB)'));
-    });
-    req.on('end', () => {
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-function toPostDto(post, db, authUserId) {
-  const author = db.users.find((u) => u.id === post.authorId);
-  const likes = db.likes.filter((l) => l.postId === post.id);
-  const comments = db.comments
-    .filter((c) => c.postId === post.id)
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  return {
-    id: post.id,
-    authorId: post.authorId,
-    author: author?.name ?? 'Unknown',
-    avatar: author?.avatar ?? '',
-    skinType: author?.skinType ?? 'Unknown',
-    timeAgo: new Date(post.createdAt).toLocaleString(),
-    title: post.title,
-    content: post.content,
-    images: post.images ?? [],
-    likes: likes.length,
-    comments: comments.length,
-    tags: post.tags ?? [],
-    isLiked: authUserId ? likes.some((l) => l.userId === authUserId) : false,
-    isSaved: false,
-    sponsored: Boolean(post.sponsored),
-    productAttachments: post.productAttachments ?? [],
-    commentItems: comments.slice(0, 5).map((comment) => {
-      const user = db.users.find((u) => u.id === comment.userId);
-      return {
-        id: comment.id,
-        authorId: comment.userId,
-        author: user?.name ?? 'Unknown',
-        avatar: user?.avatar ?? '',
-        content: comment.content,
-        createdAt: comment.createdAt
-      };
-    })
-  };
+  return db.users.find((user) => user.id === userId) ?? null;
 }
 
 function toUserDto(user) {
@@ -299,46 +65,46 @@ function toUserDto(user) {
   };
 }
 
-const DEFAULT_SKIN_TEST = {
-  skinType: '',
-  concerns: [],
-  sensitivity: '',
-  routine: '',
-  budget: '',
-  preferredIngredients: [],
-  avoidIngredients: [],
-  preferredBrands: []
-};
+function toPostDto(post, db, authUserId) {
+  const author = db.users.find((user) => user.id === post.authorId);
+  const likes = db.likes.filter((like) => like.postId === post.id);
+  const comments = db.comments
+    .filter((comment) => comment.postId === post.id)
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
-function sanitizeSkinTest(raw) {
-  const safeString = (v, max = 80) =>
-    typeof v === 'string' ? v.trim().slice(0, max) : '';
-  const safeStringArray = (v, maxItems = 40, maxLen = 80) => {
-    if (!Array.isArray(v)) return [];
-    return v
-      .filter((item) => typeof item === 'string')
-      .map((item) => item.trim().slice(0, maxLen))
-      .filter(Boolean)
-      .slice(0, maxItems);
-  };
   return {
-    skinType: safeString(raw?.skinType, 60),
-    concerns: safeStringArray(raw?.concerns),
-    sensitivity: safeString(raw?.sensitivity, 60),
-    routine: safeString(raw?.routine, 60),
-    budget: safeString(raw?.budget, 40),
-    preferredIngredients: safeStringArray(raw?.preferredIngredients),
-    avoidIngredients: safeStringArray(raw?.avoidIngredients),
-    preferredBrands: safeStringArray(raw?.preferredBrands, 40, 60)
+    id: post.id,
+    authorId: post.authorId,
+    author: author?.name ?? 'Unknown',
+    avatar: author?.avatar ?? '',
+    skinType: author?.skinType ?? 'Unknown',
+    timeAgo: new Date(post.createdAt).toLocaleString(),
+    title: post.title,
+    content: post.content,
+    images: post.images ?? [],
+    likes: likes.length,
+    comments: comments.length,
+    tags: post.tags ?? [],
+    isLiked: authUserId ? likes.some((like) => like.userId === authUserId) : false,
+    isSaved: false,
+    sponsored: Boolean(post.sponsored),
+    productAttachments: post.productAttachments ?? [],
+    commentItems: comments.slice(0, 5).map((comment) => {
+      const user = db.users.find((candidate) => candidate.id === comment.userId);
+      return {
+        id: comment.id,
+        authorId: comment.userId,
+        author: user?.name ?? 'Unknown',
+        avatar: user?.avatar ?? '',
+        content: comment.content,
+        createdAt: comment.createdAt
+      };
+    })
   };
 }
 
 function getUserSkinTest(db, userId) {
   return db.skinTests.find((row) => row.userId === userId)?.answers ?? null;
-}
-
-function generateResetToken() {
-  return randomBytes(24).toString('base64url');
 }
 
 function pruneExpiredTokens(db) {
@@ -358,7 +124,7 @@ function deriveSkinType(answers) {
   const typeTitle = type.charAt(0).toUpperCase() + type.slice(1);
   if (!sensitivity || sensitivity.toLowerCase() === 'none') return typeTitle;
   const sensTitle = sensitivity.charAt(0).toUpperCase() + sensitivity.slice(1);
-  return `${typeTitle} · ${sensTitle}`;
+  return `${typeTitle} - ${sensTitle}`;
 }
 
 function sanitizePage(rawPage) {
@@ -383,9 +149,9 @@ async function exchangeGoogleCodeForTokens(code) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: GOOGLE_CLIENT_ID,
-      client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri: GOOGLE_REDIRECT_URI,
+      client_id: config.googleClientId,
+      client_secret: config.googleClientSecret,
+      redirect_uri: config.googleRedirectUri,
       grant_type: 'authorization_code'
     })
   });
@@ -407,25 +173,26 @@ async function fetchGoogleUserInfo(accessToken) {
   return response.json();
 }
 
+async function readValidatedBody(req, schema) {
+  return parseOrThrow(schema, await parseBody(req));
+}
+
+function badRequest(res, error) {
+  return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
 
   if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
   if (url.pathname === '/api/health') return json(res, 200, { ok: true });
 
-  const db = readDb();
+  const db = await readDb();
 
   if (req.method === 'POST' && url.pathname === '/api/auth/register') {
     try {
-      const body = await parseBody(req);
-      const name = String(body.name ?? '').trim();
-      const email = String(body.email ?? '').trim().toLowerCase();
-      const password = String(body.password ?? '');
-      const skinType = String(body.skinType ?? 'Not set');
-      if (!name || !email || password.length < 6) {
-        return json(res, 400, { error: 'Invalid registration payload' });
-      }
-      if (db.users.some((u) => u.email.toLowerCase() === email)) {
+      const { name, email, password, skinType } = await readValidatedBody(req, registerSchema);
+      if (db.users.some((user) => user.email.toLowerCase() === email)) {
         return json(res, 409, { error: 'Email already exists' });
       }
       const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`;
@@ -435,32 +202,34 @@ const server = createServer(async (req, res) => {
         email,
         passwordHash: hashPassword(password),
         skinType,
-        avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop',
+        avatar: DEFAULT_AVATAR,
         emailVerified: false,
         createdAt: nowIso()
       };
       db.users.push(user);
-      writeDb(db);
-      const token = signToken(user.id);
-      return json(res, 201, { token, user: toUserDto(user) });
+      await writeDb(db);
+      return json(res, 201, {
+        token: signToken(user.id, config.tokenSecret),
+        user: toUserDto(user)
+      });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
   if (req.method === 'POST' && url.pathname === '/api/auth/login') {
     try {
-      const body = await parseBody(req);
-      const email = String(body.email ?? '').trim().toLowerCase();
-      const password = String(body.password ?? '');
-      const user = db.users.find((u) => u.email.toLowerCase() === email);
+      const { email, password } = await readValidatedBody(req, loginSchema);
+      const user = db.users.find((candidate) => candidate.email.toLowerCase() === email);
       if (!user || !verifyPassword(password, user.passwordHash)) {
         return json(res, 401, { error: 'Invalid credentials' });
       }
-      const token = signToken(user.id);
-      return json(res, 200, { token, user: toUserDto(user) });
+      return json(res, 200, {
+        token: signToken(user.id, config.tokenSecret),
+        user: toUserDto(user)
+      });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
@@ -474,31 +243,25 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     try {
-      const body = await parseBody(req);
-      const nextName = typeof body.name === 'string' ? body.name.trim().slice(0, 60) : '';
-      const nextSkinType = typeof body.skinType === 'string' ? body.skinType.trim().slice(0, 80) : '';
-      const nextAvatar = typeof body.avatar === 'string' ? body.avatar.trim() : '';
-
-      if (nextName) authUser.name = nextName;
-      if (nextSkinType) authUser.skinType = nextSkinType;
-      if (nextAvatar) {
-        const isDataUrl = nextAvatar.startsWith('data:image/') && nextAvatar.length < 3_000_000;
-        const isHttp = /^https?:\/\//.test(nextAvatar) && nextAvatar.length < 1024;
-        if (isDataUrl || isHttp) {
-          authUser.avatar = nextAvatar;
-        }
+      const { name, skinType, avatar } = await readValidatedBody(req, updateMeSchema);
+      if (name) authUser.name = name;
+      if (skinType) authUser.skinType = skinType;
+      if (avatar) {
+        const isDataUrl = avatar.startsWith('data:image/') && avatar.length < 3_000_000;
+        const isHttp = /^https?:\/\//.test(avatar) && avatar.length < 1024;
+        if (isDataUrl || isHttp) authUser.avatar = avatar;
       }
-      writeDb(db);
+      await writeDb(db);
       return json(res, 200, { user: toUserDto(authUser) });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/user/saved') {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
-    const row = db.savedProducts.find((r) => r.userId === authUser.id);
+    const row = db.savedProducts.find((entry) => entry.userId === authUser.id);
     return json(res, 200, { productIds: row?.productIds ?? [] });
   }
 
@@ -506,29 +269,21 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     try {
-      const body = await parseBody(req);
-      const rawIds = Array.isArray(body.productIds) ? body.productIds : [];
-      const productIds = rawIds
-        .map((v) => Number(v))
-        .filter((v) => Number.isFinite(v) && v > 0)
-        .slice(0, 200);
-      const existing = db.savedProducts.find((r) => r.userId === authUser.id);
-      if (existing) {
-        existing.productIds = productIds;
-      } else {
-        db.savedProducts.push({ userId: authUser.id, productIds });
-      }
-      writeDb(db);
+      const { productIds } = await readValidatedBody(req, savedProductsSchema);
+      const existing = db.savedProducts.find((entry) => entry.userId === authUser.id);
+      if (existing) existing.productIds = productIds;
+      else db.savedProducts.push({ userId: authUser.id, productIds });
+      await writeDb(db);
       return json(res, 200, { productIds });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/user/recents') {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
-    const row = db.recentProducts.find((r) => r.userId === authUser.id);
+    const row = db.recentProducts.find((entry) => entry.userId === authUser.id);
     return json(res, 200, { productIds: row?.productIds ?? [] });
   }
 
@@ -536,56 +291,45 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     try {
-      const body = await parseBody(req);
-      const productId = Number(body.productId);
-      if (!Number.isFinite(productId) || productId <= 0) {
-        return json(res, 400, { error: 'Invalid productId' });
-      }
-      const row = db.recentProducts.find((r) => r.userId === authUser.id);
+      const { productId } = await readValidatedBody(req, recentProductSchema);
+      const row = db.recentProducts.find((entry) => entry.userId === authUser.id);
       const current = row?.productIds ?? [];
-      const next = [productId, ...current.filter((id) => id !== productId)].slice(0, 20);
-      if (row) {
-        row.productIds = next;
-      } else {
-        db.recentProducts.push({ userId: authUser.id, productIds: next });
-      }
-      writeDb(db);
-      return json(res, 200, { productIds: next });
+      const productIds = [productId, ...current.filter((id) => id !== productId)].slice(0, 20);
+      if (row) row.productIds = productIds;
+      else db.recentProducts.push({ userId: authUser.id, productIds });
+      await writeDb(db);
+      return json(res, 200, { productIds });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/user/skin-test') {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
-    const answers = getUserSkinTest(db, authUser.id);
-    return json(res, 200, { answers: answers ?? null });
+    return json(res, 200, { answers: getUserSkinTest(db, authUser.id) });
   }
 
-  if (
-    (req.method === 'POST' || req.method === 'PATCH') &&
-    url.pathname === '/api/user/skin-test'
-  ) {
+  if ((req.method === 'POST' || req.method === 'PATCH') && url.pathname === '/api/user/skin-test') {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     try {
       const body = await parseBody(req);
-      const answers = sanitizeSkinTest(body?.answers ?? body);
+      const answers = parseOrThrow(skinTestAnswersSchema, body?.answers ?? body);
       const row = db.skinTests.find((entry) => entry.userId === authUser.id);
-      const payload = { answers, updatedAt: nowIso() };
+      const updatedAt = nowIso();
       if (row) {
         row.answers = answers;
-        row.updatedAt = payload.updatedAt;
+        row.updatedAt = updatedAt;
       } else {
-        db.skinTests.push({ userId: authUser.id, ...payload });
+        db.skinTests.push({ userId: authUser.id, answers, updatedAt });
       }
       const derived = deriveSkinType(answers);
       if (derived) authUser.skinType = derived;
-      writeDb(db);
+      await writeDb(db);
       return json(res, 200, { answers, user: toUserDto(authUser) });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
@@ -593,17 +337,15 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     db.skinTests = db.skinTests.filter((row) => row.userId !== authUser.id);
-    writeDb(db);
+    await writeDb(db);
     return json(res, 200, { ok: true });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/auth/password/request-reset') {
     try {
-      const body = await parseBody(req);
-      const email = String(body.email ?? '').trim().toLowerCase();
-      if (!email) return json(res, 400, { error: 'Email is required' });
+      const { email } = await readValidatedBody(req, passwordResetRequestSchema);
       pruneExpiredTokens(db);
-      const user = db.users.find((u) => u.email.toLowerCase() === email);
+      const user = db.users.find((candidate) => candidate.email.toLowerCase() === email);
       const response = { ok: true };
       if (user) {
         const resetToken = generateResetToken();
@@ -614,11 +356,11 @@ const server = createServer(async (req, res) => {
           usedAt: null,
           createdAt: nowIso()
         });
-        writeDb(db);
-        const resetUrl = new URL(FRONTEND_ORIGIN);
+        await writeDb(db);
+        const resetUrl = new URL(config.frontendOrigin);
         resetUrl.searchParams.set('reset_token', resetToken);
         console.log(`[password-reset] ${email} -> ${resetUrl.toString()}`);
-        if (process.env.EXPOSE_DEV_TOKENS === 'true' || TOKEN_SECRET === 'lillasy-dev-secret') {
+        if (config.exposeDevTokens) {
           response.devResetToken = resetToken;
           response.devResetUrl = resetUrl.toString();
         }
@@ -627,32 +369,29 @@ const server = createServer(async (req, res) => {
       }
       return json(res, 200, response);
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
   if (req.method === 'POST' && url.pathname === '/api/auth/password/reset') {
     try {
-      const body = await parseBody(req);
-      const token = String(body.token ?? '').trim();
-      const password = String(body.password ?? '');
-      if (!token || password.length < 6) {
-        return json(res, 400, { error: 'Invalid reset payload' });
-      }
+      const { token, password } = await readValidatedBody(req, passwordResetSchema);
       pruneExpiredTokens(db);
-      const entry = db.passwordResetTokens.find((r) => r.token === token && !r.usedAt);
+      const entry = db.passwordResetTokens.find((row) => row.token === token && !row.usedAt);
       if (!entry || Number(entry.exp) < Date.now()) {
         return json(res, 400, { error: 'Reset token is invalid or expired' });
       }
-      const user = db.users.find((u) => u.id === entry.userId);
+      const user = db.users.find((candidate) => candidate.id === entry.userId);
       if (!user) return json(res, 400, { error: 'User not found' });
       user.passwordHash = hashPassword(password);
       entry.usedAt = nowIso();
-      writeDb(db);
-      const authToken = signToken(user.id);
-      return json(res, 200, { token: authToken, user: toUserDto(user) });
+      await writeDb(db);
+      return json(res, 200, {
+        token: signToken(user.id, config.tokenSecret),
+        user: toUserDto(user)
+      });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
@@ -671,12 +410,12 @@ const server = createServer(async (req, res) => {
       usedAt: null,
       createdAt: nowIso()
     });
-    writeDb(db);
-    const verifyUrl = new URL(FRONTEND_ORIGIN);
+    await writeDb(db);
+    const verifyUrl = new URL(config.frontendOrigin);
     verifyUrl.searchParams.set('verify_token', verifyToken);
     console.log(`[email-verify] ${authUser.email} -> ${verifyUrl.toString()}`);
     const response = { ok: true };
-    if (process.env.EXPOSE_DEV_TOKENS === 'true' || TOKEN_SECRET === 'lillasy-dev-secret') {
+    if (config.exposeDevTokens) {
       response.devVerifyToken = verifyToken;
       response.devVerifyUrl = verifyUrl.toString();
     }
@@ -685,36 +424,34 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/api/auth/email/verify') {
     try {
-      const body = await parseBody(req);
-      const token = String(body.token ?? '').trim();
-      if (!token) return json(res, 400, { error: 'Verification token is required' });
+      const { token } = await readValidatedBody(req, verifyEmailSchema);
       pruneExpiredTokens(db);
-      const entry = db.emailVerificationTokens.find((r) => r.token === token && !r.usedAt);
+      const entry = db.emailVerificationTokens.find((row) => row.token === token && !row.usedAt);
       if (!entry || Number(entry.exp) < Date.now()) {
         return json(res, 400, { error: 'Verification token is invalid or expired' });
       }
-      const user = db.users.find((u) => u.id === entry.userId);
+      const user = db.users.find((candidate) => candidate.id === entry.userId);
       if (!user) return json(res, 400, { error: 'User not found' });
       user.emailVerified = true;
       entry.usedAt = nowIso();
-      writeDb(db);
+      await writeDb(db);
       return json(res, 200, { user: toUserDto(user) });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
   if (req.method === 'GET' && url.pathname === '/api/auth/google/start') {
-    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-      const failUrl = new URL(FRONTEND_ORIGIN);
+    if (!config.googleClientId || !config.googleClientSecret) {
+      const failUrl = new URL(config.frontendOrigin);
       failUrl.searchParams.set('auth_error', 'Google OAuth is not configured on server.');
       return redirect(res, failUrl.toString());
     }
     const page = sanitizePage(url.searchParams.get('page'));
-    const state = makeOAuthState(page);
+    const state = makeOAuthState(page, config.tokenSecret);
     const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    authUrl.searchParams.set('client_id', GOOGLE_CLIENT_ID);
-    authUrl.searchParams.set('redirect_uri', GOOGLE_REDIRECT_URI);
+    authUrl.searchParams.set('client_id', config.googleClientId);
+    authUrl.searchParams.set('redirect_uri', config.googleRedirectUri);
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('scope', 'openid profile email');
     authUrl.searchParams.set('state', state);
@@ -727,14 +464,14 @@ const server = createServer(async (req, res) => {
     const error = url.searchParams.get('error');
     const code = url.searchParams.get('code');
     const state = url.searchParams.get('state');
-    const failUrl = new URL(FRONTEND_ORIGIN);
+    const failUrl = new URL(config.frontendOrigin);
 
     if (error) {
       failUrl.searchParams.set('auth_error', `Google login failed: ${error}`);
       return redirect(res, failUrl.toString());
     }
 
-    const statePayload = readOAuthState(state ?? '');
+    const statePayload = readOAuthState(state ?? '', config.tokenSecret);
     if (!statePayload) {
       failUrl.searchParams.set('auth_error', 'Invalid or expired Google login state.');
       return redirect(res, failUrl.toString());
@@ -752,23 +489,20 @@ const server = createServer(async (req, res) => {
       const email = String(googleUser.email ?? '').trim().toLowerCase();
       const name = String(googleUser.name ?? '').trim() || 'Google User';
       const picture = String(googleUser.picture ?? '').trim();
-      if (!googleSub || !email) {
-        throw new Error('Google profile is missing required fields.');
-      }
+      if (!googleSub || !email) throw new Error('Google profile is missing required fields.');
 
       let user =
-        db.users.find((u) => u.googleSub === googleSub) ??
-        db.users.find((u) => u.email.toLowerCase() === email);
+        db.users.find((candidate) => candidate.googleSub === googleSub) ??
+        db.users.find((candidate) => candidate.email.toLowerCase() === email);
 
       if (!user) {
-        const id = `google-${googleSub.slice(0, 16)}`;
         user = {
-          id,
+          id: `google-${googleSub.slice(0, 16)}`,
           name,
           email,
           passwordHash: '',
           skinType: 'Not set',
-          avatar: picture || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop',
+          avatar: picture || DEFAULT_AVATAR,
           googleSub,
           emailVerified: true,
           createdAt: nowIso()
@@ -781,10 +515,9 @@ const server = createServer(async (req, res) => {
         user.emailVerified = true;
       }
 
-      writeDb(db);
-      const token = signToken(user.id);
-      const successUrl = new URL(FRONTEND_ORIGIN);
-      successUrl.searchParams.set('auth_token', token);
+      await writeDb(db);
+      const successUrl = new URL(config.frontendOrigin);
+      successUrl.searchParams.set('auth_token', signToken(user.id, config.tokenSecret));
       successUrl.searchParams.set('page', sanitizePage(statePayload.page));
       return redirect(res, successUrl.toString());
     } catch (callbackError) {
@@ -802,19 +535,93 @@ const server = createServer(async (req, res) => {
     return json(res, 200, { backup: db, exportedAt: nowIso() });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/admin/imported-products') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    const products = await listImportedProducts(limit);
+    return json(res, 200, { products });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/import/sephora-text') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const payload = await readValidatedBody(req, sephoraTextImportSchema);
+      const parsed = parseSephoraProductText(payload.rawText, {
+        sourceItemId: payload.sourceItemId || undefined,
+        sourceUrl: payload.sourceUrl || undefined,
+        name: payload.name || undefined,
+        brand: payload.brand || undefined
+      });
+      if (!parsed.sourceItemId) {
+        return json(res, 400, { error: 'Could not find Sephora item id in text.' });
+      }
+      const product = await upsertImportedProduct(parsed);
+      return json(res, 201, { product });
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/sephora/targets') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    const targets = await listSephoraTargets();
+    return json(res, 200, { targets });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/sephora/targets') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const payload = await readValidatedBody(req, sephoraTargetSchema);
+      const target = await upsertSephoraTarget(payload);
+      return json(res, 201, { target });
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'DELETE' && /^\/api\/admin\/sephora\/targets\/[^/]+$/.test(url.pathname)) {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    const sourceItemId = decodeURIComponent(url.pathname.split('/').pop() ?? '').trim();
+    if (!sourceItemId) return json(res, 400, { error: 'sourceItemId is required.' });
+    await deleteSephoraTarget(sourceItemId);
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/sephora/run') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const body = await parseBody(req).catch(() => ({}));
+      const options = parseOrThrow(sephoraCrawlOptionsSchema, body ?? {});
+      const summary = await runSephoraCrawl({ trigger: 'admin', ...options });
+      return json(res, 200, { run: summary });
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/sephora/runs') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    const limit = Number(url.searchParams.get('limit') ?? 20);
+    const runs = await listRecentSephoraRuns(limit);
+    return json(res, 200, { runs });
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/admin/restore') {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     try {
-      const body = await parseBody(req);
-      const backup = body?.backup;
-      if (!backup || !Array.isArray(backup.users) || !Array.isArray(backup.posts)) {
-        return json(res, 400, { error: 'Invalid backup payload' });
-      }
-      writeDb(backup);
+      const { backup } = await readValidatedBody(req, restoreBackupSchema);
+      await writeDb(backup);
       return json(res, 200, { ok: true });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
@@ -822,9 +629,8 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     const authUserId = authUser?.id ?? null;
     const followingAuthorIds = authUserId
-      ? db.follows.filter((f) => f.followerId === authUserId).map((f) => f.followingId)
+      ? db.follows.filter((follow) => follow.followerId === authUserId).map((follow) => follow.followingId)
       : [];
-
     const posts = db.posts
       .slice()
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
@@ -835,7 +641,6 @@ const server = createServer(async (req, res) => {
       skinType: user.skinType,
       avatar: user.avatar
     }));
-
     return json(res, 200, { posts, creators, followingAuthorIds });
   }
 
@@ -843,38 +648,26 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     try {
-      const body = await parseBody(req);
-      const content = String(body.content ?? '').trim();
-      const title = String(body.title ?? '').trim() || 'My skincare note';
-      const attachments = Array.isArray(body.productAttachments) ? body.productAttachments.slice(0, 3) : [];
-      const rawImages = Array.isArray(body.images) ? body.images.slice(0, 4) : [];
-      const images = rawImages
-        .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
-        .filter((entry) =>
-          entry.length > 0 &&
-          entry.length < 4_000_000 &&
-          (entry.startsWith('data:image/') || /^https?:\/\//.test(entry))
-        );
-      if (!content && attachments.length === 0 && images.length === 0) {
+      const { title, content, productAttachments, images } = await readValidatedBody(req, createPostSchema);
+      if (!content && productAttachments.length === 0 && images.length === 0) {
         return json(res, 400, { error: 'Post content is empty' });
       }
-
       const post = {
         id: db.nextPostId++,
         authorId: authUser.id,
         title,
         content,
         images,
-        tags: ['My Post', ...(attachments.length ? ['Product Pick'] : ['Routine'])],
+        tags: ['My Post', ...(productAttachments.length ? ['Product Pick'] : ['Routine'])],
         sponsored: false,
-        productAttachments: attachments,
+        productAttachments,
         createdAt: nowIso()
       };
       db.posts.push(post);
-      writeDb(db);
+      await writeDb(db);
       return json(res, 201, { post: toPostDto(post, db, authUser.id) });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
@@ -882,15 +675,12 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     const postId = Number(url.pathname.split('/')[4]);
-    const exists = db.likes.find((l) => l.postId === postId && l.userId === authUser.id);
-    if (exists) {
-      db.likes = db.likes.filter((l) => !(l.postId === postId && l.userId === authUser.id));
-    } else {
-      db.likes.push({ postId, userId: authUser.id });
-    }
-    writeDb(db);
-    const post = db.posts.find((p) => p.id === postId);
+    const post = db.posts.find((candidate) => candidate.id === postId);
     if (!post) return json(res, 404, { error: 'Post not found' });
+    const exists = db.likes.find((like) => like.postId === postId && like.userId === authUser.id);
+    if (exists) db.likes = db.likes.filter((like) => !(like.postId === postId && like.userId === authUser.id));
+    else db.likes.push({ postId, userId: authUser.id });
+    await writeDb(db);
     return json(res, 200, { post: toPostDto(post, db, authUser.id) });
   }
 
@@ -898,12 +688,10 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     const postId = Number(url.pathname.split('/')[4]);
-    const post = db.posts.find((p) => p.id === postId);
+    const post = db.posts.find((candidate) => candidate.id === postId);
     if (!post) return json(res, 404, { error: 'Post not found' });
     try {
-      const body = await parseBody(req);
-      const content = String(body.content ?? '').trim();
-      if (!content) return json(res, 400, { error: 'Comment is empty' });
+      const { content } = await readValidatedBody(req, commentSchema);
       db.comments.push({
         id: db.nextCommentId++,
         postId,
@@ -911,10 +699,10 @@ const server = createServer(async (req, res) => {
         content,
         createdAt: nowIso()
       });
-      writeDb(db);
+      await writeDb(db);
       return json(res, 201, { post: toPostDto(post, db, authUser.id) });
     } catch (error) {
-      return json(res, 400, { error: String(error.message ?? error) });
+      return badRequest(res, error);
     }
   }
 
@@ -922,27 +710,31 @@ const server = createServer(async (req, res) => {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
     const authorId = decodeURIComponent(url.pathname.split('/').pop() ?? '');
-    if (!authorId || !db.users.some((u) => u.id === authorId) || authorId === authUser.id) {
+    if (!authorId || !db.users.some((user) => user.id === authorId) || authorId === authUser.id) {
       return json(res, 400, { error: 'Invalid author target' });
     }
-
-    const exists = db.follows.find((f) => f.followerId === authUser.id && f.followingId === authorId);
+    const exists = db.follows.find(
+      (follow) => follow.followerId === authUser.id && follow.followingId === authorId
+    );
     if (exists) {
-      db.follows = db.follows.filter((f) => !(f.followerId === authUser.id && f.followingId === authorId));
+      db.follows = db.follows.filter(
+        (follow) => !(follow.followerId === authUser.id && follow.followingId === authorId)
+      );
     } else {
       db.follows.push({ followerId: authUser.id, followingId: authorId });
     }
-    writeDb(db);
+    await writeDb(db);
     const followingAuthorIds = db.follows
-      .filter((f) => f.followerId === authUser.id)
-      .map((f) => f.followingId);
+      .filter((follow) => follow.followerId === authUser.id)
+      .map((follow) => follow.followingId);
     return json(res, 200, { followingAuthorIds });
   }
 
   return json(res, 404, { error: 'Not found' });
 });
 
-server.listen(PORT, () => {
-  ensureDb();
-  console.log(`lillasy backend listening on http://localhost:${PORT}`);
+server.listen(config.port, async () => {
+  await ensureDb();
+  console.log(`lillasy backend listening on http://localhost:${config.port}`);
+  startSephoraScheduler({ logger: console });
 });
