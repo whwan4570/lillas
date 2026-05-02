@@ -1,11 +1,20 @@
 import { config } from './config.mjs';
 
+function resolveAllowedOrigin(req) {
+  const requestOrigin = String(req?.headers?.origin ?? '').trim();
+  if (!requestOrigin) return config.frontendOrigin;
+  if (config.frontendOrigins.includes(requestOrigin)) return requestOrigin;
+  return config.frontendOrigin;
+}
+
 export function json(res, statusCode, body) {
+  const allowedOrigin = resolveAllowedOrigin(res.req);
   res.writeHead(statusCode, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': config.frontendOrigin,
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS'
+    'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+    Vary: 'Origin'
   });
   res.end(JSON.stringify(body));
 }

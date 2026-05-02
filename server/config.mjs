@@ -38,9 +38,24 @@ if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'file:./dev.db';
 }
 
+function parseFrontendOrigins() {
+  const primary = String(process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const extra = String(process.env.FRONTEND_ORIGINS ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return [...new Set([...primary, ...extra])];
+}
+
+const frontendOrigins = parseFrontendOrigins();
+
 export const config = {
   exposeDevTokens: process.env.EXPOSE_DEV_TOKENS === 'true',
-  frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  frontendOrigin: frontendOrigins[0] ?? 'http://localhost:5173',
+  frontendOrigins,
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
   googleRedirectUri:
