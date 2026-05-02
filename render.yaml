@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: lillasy-api
+    runtime: node
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /api/health
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm prisma generate && pnpm prisma db push
+    startCommand: node server/index.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PORT
+        value: 10000
+      - key: TOKEN_SECRET
+        generateValue: true
+      - key: FRONTEND_ORIGIN
+        value: https://www.lillasy.com
+      - key: FRONTEND_ORIGINS
+        value: https://www.lillasy.com,https://lillasy.com
+      - key: EXPOSE_DEV_TOKENS
+        value: "false"
+      - key: SEPHORA_CRAWLER_ENABLED
+        value: "false"
+      - key: SEPHORA_CRAWLER_INTERVAL_HOURS
+        value: "24"
+      - key: SEPHORA_FETCHER
+        value: fetch
+      # Fill these in Render dashboard after first sync.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://api.lillasy.com/api/auth/google/callback

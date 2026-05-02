@@ -8,9 +8,11 @@ yarn-error.log*
 pnpm-debug.log*
 .env
 .env.*
+!.env.render.example
 .idea/
 .vscode/
 server/db.json
 prisma/*.db
 prisma/*.db-journal
 .commitmsg.tmp
+client_secret_*.json

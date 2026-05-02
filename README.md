@@ -11,6 +11,27 @@
 
   Run `npm run dev:server` to start the backend (also boots the Sephora scheduler when enabled).
 
+  ## Deploy backend to Render
+
+  This repository includes a `render.yaml` Blueprint so Render can create the
+  backend service with sane defaults in one go.
+
+  1. In Render, choose **New + → Blueprint** and select this repo.
+  2. Render reads `render.yaml` and creates `lillasy-api` with:
+     - build: `pnpm install && prisma generate && prisma db push`
+     - start: `node server/index.mjs`
+     - health check: `/api/health`
+     - `TOKEN_SECRET` auto-generated
+  3. After creation, fill only the `sync: false` env vars in Render dashboard:
+     - `DATABASE_URL`
+     - `DIRECT_URL`
+     - `GOOGLE_CLIENT_ID`
+     - `GOOGLE_CLIENT_SECRET`
+  4. Add custom domain `api.lillasy.com` in Render.
+  5. Set `GOOGLE_REDIRECT_URI=https://api.lillasy.com/api/auth/google/callback`.
+
+  A copy/paste template for these values is in `.env.render.example`.
+
   ## Sephora live crawler
 
   The backend ships with a Sephora product crawler that fetches a product page,
