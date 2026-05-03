@@ -11,7 +11,10 @@ import { crawlSephoraTargets } from './sephoraCrawler.mjs';
 import { standardizeProduct } from './sephoraSchema.mjs';
 import { evaluateRunForAlerts, notifyAlerts } from './crawlerAlerts.mjs';
 
-const DEFAULT_REQUEST_DELAY_MS = 2_500;
+// Sephora's Akamai BotManager keys on burst patterns. In production we
+// pace requests at ~30s by default — this can be tuned with the
+// SEPHORA_REQUEST_DELAY_MS env var when the upstream IP/proxy is well-warmed.
+const DEFAULT_REQUEST_DELAY_MS = Number(process.env.SEPHORA_REQUEST_DELAY_MS) || 30_000;
 const DEFAULT_INTERVAL_HOURS = 24;
 
 async function selectFetchPage() {

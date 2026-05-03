@@ -151,6 +151,39 @@
   headless fingerprints, so a clean residential IP + headed real Chrome is
   usually required for sustained crawling.
 
+  ### Production crawl tuning (verified)
+
+  Live verification (May 2026) confirmed that the following combo successfully
+  pulls real product data from `sephora.com` (brand, name, price, rating,
+  review count, image URLs):
+
+  ```bash
+  SEPHORA_FETCHER=playwright
+  SEPHORA_PLAYWRIGHT_HEADLESS=false        # or true with stealth, see below
+  SEPHORA_PLAYWRIGHT_CHANNEL=chrome        # use locally installed Chrome
+  SEPHORA_PLAYWRIGHT_PERSISTENT=true       # reuse cookies between runs
+  SEPHORA_PLAYWRIGHT_WARMUP=true           # visit sephora.com first
+  SEPHORA_PLAYWRIGHT_RESET_AFTER_BLOCKS=2  # reset context if Akamai catches on
+  SEPHORA_REQUEST_DELAY_MS=30000           # 30 s between requests
+  ```
+
+  Stealth patches are applied automatically when `playwright-extra` +
+  `puppeteer-extra-plugin-stealth` are installed (already in `devDependencies`).
+  These hide `navigator.webdriver`, the headless Chromium fingerprint, and
+  similar tells.
+
+  Discontinued items (e.g. SKU redirected to `/search?keyword=productnotcarried`)
+  are detected and saved as `not_found`, not as silent empty rows.
+
+  Failure modes you may still see:
+
+  - **5+ targets in one run = bot challenge**: pace the crawl with
+    `SEPHORA_REQUEST_DELAY_MS=30000` (default) and let `RESET_AFTER_BLOCKS`
+    auto-recycle the browser context.
+  - **All targets blocked**: the IP is flagged. Switch on a residential
+    proxy via `SEPHORA_PLAYWRIGHT_PROXY` or run the crawler from a residential
+    machine.
+
   ### Connecting to Supabase (Postgres)
 
   The default storage is a local SQLite file (`dev.db`). To use Supabase
