@@ -18,7 +18,7 @@
 
   1. In Render, choose **New + → Blueprint** and select this repo.
   2. Render reads `render.yaml` and creates `lillasy-api` with:
-     - build: `pnpm install && prisma generate && prisma db push`
+     - build: `pnpm install && prisma generate`
      - start: `node server/index.mjs`
      - health check: `/api/health`
      - `TOKEN_SECRET` auto-generated
@@ -29,6 +29,8 @@
      - `GOOGLE_CLIENT_SECRET`
   4. Add custom domain `api.lillasy.com` in Render.
   5. Set `GOOGLE_REDIRECT_URI=https://api.lillasy.com/api/auth/google/callback`.
+  6. In Render Shell (or local once with production env vars), run one time:
+     - `pnpm prisma db push`
 
   A copy/paste template for these values is in `.env.render.example`.
 
