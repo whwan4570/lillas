@@ -15,6 +15,7 @@ import { EmailVerificationBanner } from './components/EmailVerificationBanner';
 import type { SkinTestAnswers } from './types';
 import { buildUserProfile, type UserProfile } from '../lib/recommendationEngine';
 import {
+  ApiError,
   getMe,
   getRecentProducts,
   getSavedProducts,
@@ -133,12 +134,23 @@ export default function App() {
       skinTestHydratedRef.current = false;
       return;
     }
+    let cancelled = false;
     getMe(authToken)
-      .then((result) => setAuthUser(result.user))
-      .catch(() => {
-        setAuthToken(null);
-        setAuthUser(null);
+      .then((result) => {
+        if (cancelled) return;
+        setAuthUser(result.user);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        // Only force logout when the token is truly invalid.
+        if (error instanceof ApiError && error.status === 401) {
+          setAuthToken(null);
+          setAuthUser(null);
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, [authToken]);
 
   useEffect(() => {

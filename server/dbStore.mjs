@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { hashPassword } from './security.mjs';
 
 export const prisma = new PrismaClient();
+let writeDbQueue = Promise.resolve();
 
 export function nowIso() {
   return new Date().toISOString();
@@ -15,6 +16,25 @@ export function detectDatabaseProvider() {
 }
 
 const DB_PROVIDER = detectDatabaseProvider();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableWriteDbError(error) {
+  const message = String(error?.message ?? '');
+  return (
+    error?.code === 'P2024' ||
+    message.includes('deadlock detected') ||
+    message.includes('code: "40P01"')
+  );
+}
+
+function withWriteDbLock(task) {
+  const run = writeDbQueue.then(task, task);
+  writeDbQueue = run.catch(() => {});
+  return run;
+}
 
 export function seedData() {
   return {
@@ -148,7 +168,7 @@ export async function readDb() {
     passwordResetTokens,
     emailVerificationTokens,
     counters
-  ] = await Promise.all([
+  ] = await prisma.$transaction([
     prisma.user.findMany(),
     prisma.post.findMany(),
     prisma.comment.findMany(),
@@ -214,139 +234,149 @@ export async function readDb() {
 export async function writeDb(db) {
   await ensureSqlSchema();
   const normalized = normalizeDb(db);
-  await prisma.$transaction(async (tx) => {
-    await tx.emailVerificationToken.deleteMany();
-    await tx.passwordResetToken.deleteMany();
-    await tx.skinTest.deleteMany();
-    await tx.recentProduct.deleteMany();
-    await tx.savedProduct.deleteMany();
-    await tx.follow.deleteMany();
-    await tx.like.deleteMany();
-    await tx.comment.deleteMany();
-    await tx.post.deleteMany();
-    await tx.user.deleteMany();
-    await tx.counter.deleteMany();
+  await withWriteDbLock(async () => {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.emailVerificationToken.deleteMany();
+          await tx.passwordResetToken.deleteMany();
+          await tx.skinTest.deleteMany();
+          await tx.recentProduct.deleteMany();
+          await tx.savedProduct.deleteMany();
+          await tx.follow.deleteMany();
+          await tx.like.deleteMany();
+          await tx.comment.deleteMany();
+          await tx.post.deleteMany();
+          await tx.user.deleteMany();
+          await tx.counter.deleteMany();
 
-    if (normalized.users.length) {
-      await tx.user.createMany({
-        data: normalized.users.map((user) => ({
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          passwordHash: user.passwordHash ?? '',
-          skinType: user.skinType ?? 'Not set',
-          avatar: user.avatar ?? '',
-          emailVerified: Boolean(user.emailVerified || user.googleSub),
-          googleSub: user.googleSub ?? null,
-          createdAt: toDate(user.createdAt)
-        }))
-      });
+          if (normalized.users.length) {
+            await tx.user.createMany({
+              data: normalized.users.map((user) => ({
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                passwordHash: user.passwordHash ?? '',
+                skinType: user.skinType ?? 'Not set',
+                avatar: user.avatar ?? '',
+                emailVerified: Boolean(user.emailVerified || user.googleSub),
+                googleSub: user.googleSub ?? null,
+                createdAt: toDate(user.createdAt)
+              }))
+            });
+          }
+
+          if (normalized.posts.length) {
+            await tx.post.createMany({
+              data: normalized.posts.map((post) => ({
+                id: Number(post.id),
+                authorId: post.authorId,
+                title: post.title,
+                content: post.content,
+                imagesJson: stringifyJson(post.images ?? []),
+                tagsJson: stringifyJson(post.tags ?? []),
+                sponsored: Boolean(post.sponsored),
+                productAttachmentsJson: stringifyJson(post.productAttachments ?? []),
+                createdAt: toDate(post.createdAt)
+              }))
+            });
+          }
+
+          if (normalized.comments.length) {
+            await tx.comment.createMany({
+              data: normalized.comments.map((comment) => ({
+                id: Number(comment.id),
+                postId: Number(comment.postId),
+                userId: comment.userId,
+                content: comment.content,
+                createdAt: toDate(comment.createdAt)
+              }))
+            });
+          }
+
+          if (normalized.likes.length) {
+            await tx.like.createMany({
+              data: normalized.likes.map((like) => ({
+                postId: Number(like.postId),
+                userId: like.userId
+              }))
+            });
+          }
+
+          if (normalized.follows.length) {
+            await tx.follow.createMany({
+              data: normalized.follows.map((follow) => ({
+                followerId: follow.followerId,
+                followingId: follow.followingId
+              }))
+            });
+          }
+
+          if (normalized.savedProducts.length) {
+            await tx.savedProduct.createMany({
+              data: normalized.savedProducts.map((row) => ({
+                userId: row.userId,
+                productIdsJson: stringifyJson(row.productIds ?? [])
+              }))
+            });
+          }
+
+          if (normalized.recentProducts.length) {
+            await tx.recentProduct.createMany({
+              data: normalized.recentProducts.map((row) => ({
+                userId: row.userId,
+                productIdsJson: stringifyJson(row.productIds ?? [])
+              }))
+            });
+          }
+
+          if (normalized.skinTests.length) {
+            await tx.skinTest.createMany({
+              data: normalized.skinTests.map((row) => ({
+                userId: row.userId,
+                answersJson: stringifyJson(row.answers ?? null),
+                updatedAt: toDate(row.updatedAt)
+              }))
+            });
+          }
+
+          if (normalized.passwordResetTokens.length) {
+            await tx.passwordResetToken.createMany({
+              data: normalized.passwordResetTokens.map((token) => ({
+                token: token.token,
+                userId: token.userId,
+                exp: BigInt(token.exp),
+                usedAt: token.usedAt ?? null,
+                createdAt: token.createdAt ?? nowIso()
+              }))
+            });
+          }
+
+          if (normalized.emailVerificationTokens.length) {
+            await tx.emailVerificationToken.createMany({
+              data: normalized.emailVerificationTokens.map((token) => ({
+                token: token.token,
+                userId: token.userId,
+                exp: BigInt(token.exp),
+                usedAt: token.usedAt ?? null,
+                createdAt: token.createdAt ?? nowIso()
+              }))
+            });
+          }
+
+          await tx.counter.createMany({
+            data: [
+              { key: 'nextPostId', value: normalized.nextPostId },
+              { key: 'nextCommentId', value: normalized.nextCommentId }
+            ]
+          });
+        });
+        return;
+      } catch (error) {
+        if (!isRetryableWriteDbError(error) || attempt === 3) throw error;
+        await sleep(200 * attempt);
+      }
     }
-
-    if (normalized.posts.length) {
-      await tx.post.createMany({
-        data: normalized.posts.map((post) => ({
-          id: Number(post.id),
-          authorId: post.authorId,
-          title: post.title,
-          content: post.content,
-          imagesJson: stringifyJson(post.images ?? []),
-          tagsJson: stringifyJson(post.tags ?? []),
-          sponsored: Boolean(post.sponsored),
-          productAttachmentsJson: stringifyJson(post.productAttachments ?? []),
-          createdAt: toDate(post.createdAt)
-        }))
-      });
-    }
-
-    if (normalized.comments.length) {
-      await tx.comment.createMany({
-        data: normalized.comments.map((comment) => ({
-          id: Number(comment.id),
-          postId: Number(comment.postId),
-          userId: comment.userId,
-          content: comment.content,
-          createdAt: toDate(comment.createdAt)
-        }))
-      });
-    }
-
-    if (normalized.likes.length) {
-      await tx.like.createMany({
-        data: normalized.likes.map((like) => ({
-          postId: Number(like.postId),
-          userId: like.userId
-        }))
-      });
-    }
-
-    if (normalized.follows.length) {
-      await tx.follow.createMany({
-        data: normalized.follows.map((follow) => ({
-          followerId: follow.followerId,
-          followingId: follow.followingId
-        }))
-      });
-    }
-
-    if (normalized.savedProducts.length) {
-      await tx.savedProduct.createMany({
-        data: normalized.savedProducts.map((row) => ({
-          userId: row.userId,
-          productIdsJson: stringifyJson(row.productIds ?? [])
-        }))
-      });
-    }
-
-    if (normalized.recentProducts.length) {
-      await tx.recentProduct.createMany({
-        data: normalized.recentProducts.map((row) => ({
-          userId: row.userId,
-          productIdsJson: stringifyJson(row.productIds ?? [])
-        }))
-      });
-    }
-
-    if (normalized.skinTests.length) {
-      await tx.skinTest.createMany({
-        data: normalized.skinTests.map((row) => ({
-          userId: row.userId,
-          answersJson: stringifyJson(row.answers ?? null),
-          updatedAt: toDate(row.updatedAt)
-        }))
-      });
-    }
-
-    if (normalized.passwordResetTokens.length) {
-      await tx.passwordResetToken.createMany({
-        data: normalized.passwordResetTokens.map((token) => ({
-          token: token.token,
-          userId: token.userId,
-          exp: BigInt(token.exp),
-          usedAt: token.usedAt ?? null,
-          createdAt: token.createdAt ?? nowIso()
-        }))
-      });
-    }
-
-    if (normalized.emailVerificationTokens.length) {
-      await tx.emailVerificationToken.createMany({
-        data: normalized.emailVerificationTokens.map((token) => ({
-          token: token.token,
-          userId: token.userId,
-          exp: BigInt(token.exp),
-          usedAt: token.usedAt ?? null,
-          createdAt: token.createdAt ?? nowIso()
-        }))
-      });
-    }
-
-    await tx.counter.createMany({
-      data: [
-        { key: 'nextPostId', value: normalized.nextPostId },
-        { key: 'nextCommentId', value: normalized.nextCommentId }
-      ]
-    });
   });
 }
 

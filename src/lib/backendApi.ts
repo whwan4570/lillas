@@ -72,6 +72,16 @@ interface ApiRequestOptions {
   body?: unknown;
 }
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method ?? 'GET',
@@ -84,7 +94,7 @@ async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Pro
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.error ?? `Request failed: ${response.status}`);
+    throw new ApiError(payload?.error ?? `Request failed: ${response.status}`, response.status);
   }
   return payload as T;
 }
