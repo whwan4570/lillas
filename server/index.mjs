@@ -13,6 +13,7 @@ import {
 } from './dbStore.mjs';
 import { json, parseBody, redirect } from './http.mjs';
 import { parseSephoraProductText } from './productImport.mjs';
+import { standardizeProduct } from './sephoraSchema.mjs';
 import { listRecentSephoraRuns, runSephoraCrawl } from './sephoraRunner.mjs';
 import { startSephoraScheduler } from './sephoraScheduler.mjs';
 import {
@@ -557,8 +558,12 @@ const server = createServer(async (req, res) => {
       if (!parsed.sourceItemId) {
         return json(res, 400, { error: 'Could not find Sephora item id in text.' });
       }
-      const product = await upsertImportedProduct(parsed);
-      return json(res, 201, { product });
+      const standardized = standardizeProduct(parsed);
+      const product = await upsertImportedProduct(standardized);
+      return json(res, 201, {
+        product,
+        quality: { score: standardized.qualityScore, warnings: standardized.warnings }
+      });
     } catch (error) {
       return badRequest(res, error);
     }

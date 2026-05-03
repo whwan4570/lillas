@@ -78,7 +78,36 @@
   - `GET /api/admin/sephora/runs?limit=20` — last crawler runs (status,
     processed/succeeded/failed counts, error message if any).
   - `GET /api/admin/imported-products` — the catalog itself; freshly crawled
-    items expose a `crawledAt` timestamp.
+    items expose a `crawledAt` timestamp plus standardized v2 metadata
+    (`schemaVersion`, `qualityScore`, `warnings`, `sizeMl`, `sizeOz`).
+
+  ### Standardization (schema v2) and backfill
+
+  Every product written to `ImportedProduct` is normalized through
+  `server/sephoraSchema.mjs` (`standardizeProduct(...)`). It strips HTML,
+  decodes entities, normalizes smart quotes (e.g. `Kiehl's`), parses size
+  into ml/oz, dedupes arrays, clamps prices/ratings, and computes a
+  `qualityScore` (0–100) plus `warnings` for missing required fields.
+  Failure thresholds (high failure rate, consecutive failures, bot blocking,
+  stale targets) are evaluated after every run by
+  `server/crawlerAlerts.mjs` and optionally posted to a Slack/Discord
+  webhook (`SEPHORA_ALERT_WEBHOOK_URL`).
+
+  After deploying the v2 schema (`pnpm prisma db push`), backfill the
+  existing rows so they get the new columns populated:
+
+  ```bash
+  # Preview only (no writes)
+  pnpm db:backfill:sephora -- --dry-run
+
+  # Re-standardize every row
+  pnpm db:backfill:sephora
+
+  # Only rows still on schemaVersion < 2
+  pnpm db:backfill:sephora -- --only-stale
+  ```
+
+  Full schema reference: `docs/sephora-schema-v1.md`.
 
   ### Choosing a fetcher (Akamai bypass)
 

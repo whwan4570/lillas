@@ -8,6 +8,8 @@ import {
   upsertImportedProduct
 } from './dbStore.mjs';
 import { crawlSephoraTargets } from './sephoraCrawler.mjs';
+import { standardizeProduct } from './sephoraSchema.mjs';
+import { evaluateRunForAlerts, notifyAlerts } from './crawlerAlerts.mjs';
 
 const DEFAULT_REQUEST_DELAY_MS = 2_500;
 const DEFAULT_INTERVAL_HOURS = 24;
@@ -62,11 +64,22 @@ export async function runSephoraCrawl({ trigger = 'manual', logger = console, ..
     }
   });
 
+  let lowQualityCount = 0;
   for (const result of results) {
     if (result.status === 'ok') {
       try {
-        await upsertImportedProduct(result.product);
-        await recordTargetCrawl(result.target.sourceItemId, { status: 'ok' });
+        const standardized = standardizeProduct(result.product);
+        if (standardized.warnings.length) {
+          lowQualityCount += 1;
+          logger.warn?.(
+            `[sephora-crawler] quality warnings ${standardized.sourceItemId}: ${standardized.warnings.join(', ')}`
+          );
+        }
+        await upsertImportedProduct(standardized);
+        await recordTargetCrawl(result.target.sourceItemId, {
+          status: standardized.warnings.length ? 'ok_with_warnings' : 'ok',
+          errorMessage: standardized.warnings.length ? standardized.warnings.join(', ') : null
+        });
         succeeded += 1;
       } catch (saveError) {
         failed += 1;
@@ -99,9 +112,33 @@ export async function runSephoraCrawl({ trigger = 'manual', logger = console, ..
   });
 
   logger.info?.(
-    `[sephora-crawler] run #${run.id} finished: status=${status} processed=${results.length} ok=${succeeded} fail=${failed}`
+    `[sephora-crawler] run #${run.id} finished: status=${status} processed=${results.length} ok=${succeeded} fail=${failed} lowQuality=${lowQualityCount}`
   );
-  return { runId: run.id, processed: results.length, succeeded, failed, status, results };
+
+  try {
+    const alerts = await evaluateRunForAlerts({
+      runId: run.id,
+      processed: results.length,
+      succeeded,
+      failed,
+      status
+    });
+    if (alerts.length) {
+      await notifyAlerts(alerts, { logger });
+    }
+  } catch (alertError) {
+    logger.warn?.(`[sephora-crawler] alert evaluation failed: ${alertError?.message ?? alertError}`);
+  }
+
+  return {
+    runId: run.id,
+    processed: results.length,
+    succeeded,
+    failed,
+    lowQuality: lowQualityCount,
+    status,
+    results
+  };
 }
 
 export async function listRecentSephoraRuns(limit = 20) {

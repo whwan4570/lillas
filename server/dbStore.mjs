@@ -416,7 +416,12 @@ function importedProductColumns(product) {
     inciIngredientsJson: stringifyJson(product.inciIngredients ?? []),
     sourceUrl: product.sourceUrl ?? null,
     rawText: product.rawText ?? '',
-    crawledAt: product.crawledAt ? toDate(product.crawledAt) : null
+    crawledAt: product.crawledAt ? toDate(product.crawledAt) : null,
+    schemaVersion: Number.isFinite(product.schemaVersion) ? Number(product.schemaVersion) : 1,
+    qualityScore: Number.isFinite(product.qualityScore) ? Number(product.qualityScore) : null,
+    warningsJson: stringifyJson(Array.isArray(product.warnings) ? product.warnings : []),
+    sizeMl: Number.isFinite(product.sizeMl) ? Number(product.sizeMl) : null,
+    sizeOz: Number.isFinite(product.sizeOz) ? Number(product.sizeOz) : null
   };
 }
 
@@ -442,6 +447,20 @@ export async function listImportedProducts(limit = 50) {
     take: safeLimit
   });
   return rows.map(toImportedProductDto);
+}
+
+export async function paginateImportedProducts({ cursor = null, take = 100 } = {}) {
+  await ensureSqlSchema();
+  const safeTake = Math.max(1, Math.min(500, Number(take) || 100));
+  const rows = await prisma.importedProduct.findMany({
+    take: safeTake + 1,
+    orderBy: { id: 'asc' },
+    ...(cursor != null ? { cursor: { id: Number(cursor) }, skip: 1 } : {})
+  });
+  const hasMore = rows.length > safeTake;
+  const slice = hasMore ? rows.slice(0, safeTake) : rows;
+  const nextCursor = hasMore ? slice[slice.length - 1].id : null;
+  return { items: slice.map(toImportedProductDto), nextCursor };
 }
 
 function parseJson(raw, fallback) {
@@ -634,6 +653,11 @@ function toImportedProductDto(row) {
     sourceUrl: row.sourceUrl,
     rawText: row.rawText,
     crawledAt: toIsoString(row.crawledAt),
+    schemaVersion: row.schemaVersion ?? 1,
+    qualityScore: row.qualityScore ?? null,
+    warnings: parseJson(row.warningsJson, []),
+    sizeMl: row.sizeMl ?? null,
+    sizeOz: row.sizeOz ?? null,
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt)
   };
@@ -809,6 +833,11 @@ async function ensureSqlSchemaSqlite() {
   await ensureColumn('ImportedProduct', 'imageUrlsJson', "TEXT NOT NULL DEFAULT '[]'");
   await ensureColumn('ImportedProduct', 'highlightsJson', "TEXT NOT NULL DEFAULT '[]'");
   await ensureColumn('ImportedProduct', 'crawledAt', 'DATETIME');
+  await ensureColumn('ImportedProduct', 'schemaVersion', 'INTEGER NOT NULL DEFAULT 1');
+  await ensureColumn('ImportedProduct', 'qualityScore', 'INTEGER');
+  await ensureColumn('ImportedProduct', 'warningsJson', "TEXT NOT NULL DEFAULT '[]'");
+  await ensureColumn('ImportedProduct', 'sizeMl', 'REAL');
+  await ensureColumn('ImportedProduct', 'sizeOz', 'REAL');
 
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "SephoraTarget" (

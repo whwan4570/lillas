@@ -128,6 +128,11 @@ model ImportedProduct {
   sourceUrl              String?
   rawText                String
   crawledAt              DateTime?
+  schemaVersion          Int       @default(1)
+  qualityScore           Int?
+  warningsJson           String    @default("[]")
+  sizeMl                 Float?
+  sizeOz                 Float?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 }

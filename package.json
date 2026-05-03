@@ -9,6 +9,8 @@
     "dev:server": "node server/index.mjs",
     "import:sephora:seed": "node server/importSephoraSeed.mjs",
     "crawl:sephora": "node server/runSephoraCrawl.mjs",
+    "discover:sephora": "node server/discoverSephoraProducts.mjs",
+    "db:backfill:sephora": "node server/backfillImportedProducts.mjs",
     "prisma:generate": "prisma generate",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
