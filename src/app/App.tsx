@@ -34,6 +34,7 @@ const SAVED_PRODUCTS_KEY = 'lillasy_saved_products';
 const SKIN_TEST_ANSWERS_KEY = 'lillasy_skin_test_answers';
 const AUTH_TOKEN_KEY = 'lillasy_auth_token';
 const RECENT_PRODUCTS_KEY = 'lillasy_recent_products';
+const AUTH_ME_RETRY_DELAY_MS = 700;
 const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8787/api').replace(
   /\/api\/?$/,
   ''
@@ -136,19 +137,33 @@ export default function App() {
       return;
     }
     let cancelled = false;
-    getMe(authToken)
-      .then((result) => {
+    const resolveAuthUser = async () => {
+      try {
+        const result = await getMe(authToken);
         if (cancelled) return;
         setAuthUser(result.user);
-      })
-      .catch((error) => {
+      } catch (firstError) {
         if (cancelled) return;
-        // Only force logout when the token is truly invalid.
-        if (error instanceof ApiError && error.status === 401) {
-          setAuthToken(null);
-          setAuthUser(null);
+        // On some local restarts, the first auth check can briefly return 401.
+        if (firstError instanceof ApiError && firstError.status === 401) {
+          await new Promise((resolve) => window.setTimeout(resolve, AUTH_ME_RETRY_DELAY_MS));
+          if (cancelled) return;
+          try {
+            const retryResult = await getMe(authToken);
+            if (cancelled) return;
+            setAuthUser(retryResult.user);
+          } catch (retryError) {
+            if (cancelled) return;
+            if (retryError instanceof ApiError && retryError.status === 401) {
+              setAuthToken(null);
+              setAuthUser(null);
+            }
+          }
+          return;
         }
-      });
+      }
+    };
+    void resolveAuthUser();
     return () => {
       cancelled = true;
     };
