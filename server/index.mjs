@@ -4,8 +4,10 @@ import {
   deleteSephoraTarget,
   ensureDb,
   listImportedProducts,
+  listPipelineRuns,
   listSephoraTargets,
   nowIso,
+  prisma,
   readDb,
   upsertImportedProduct,
   upsertSephoraTarget,
@@ -13,6 +15,22 @@ import {
 } from './dbStore.mjs';
 import { json, parseBody, redirect } from './http.mjs';
 import { parseSephoraProductText } from './productImport.mjs';
+import { runImportAndEnrichPipeline } from './productPipeline.mjs';
+import { createPrismaProductRepo } from './productPipelinePrismaRepo.mjs';
+import {
+  discoverCandidateSources,
+  materializeProductSourceFromDbRow,
+  reprocessAmazonSources,
+  safeParseJson,
+  toPipelineResultDto
+} from './productPipelineReprocessor.mjs';
+import { startProductPipelineScheduler } from './productPipelineScheduler.mjs';
+import {
+  amazonItemToProductSource,
+  brandOfficialToProductSource,
+  sephoraImportedToProductSource,
+  ultaItemToProductSource
+} from './productSourceAdapters.mjs';
 import { standardizeProduct } from './sephoraSchema.mjs';
 import { listRecentSephoraRuns, runSephoraCrawl } from './sephoraRunner.mjs';
 import { startSephoraScheduler } from './sephoraScheduler.mjs';
@@ -32,6 +50,9 @@ import {
   parseOrThrow,
   passwordResetRequestSchema,
   passwordResetSchema,
+  pipelineReprocessSchema,
+  pipelineReviewQuerySchema,
+  pipelineRunSchema,
   recentProductSchema,
   registerSchema,
   restoreBackupSchema,
@@ -46,6 +67,7 @@ import {
 
 const DEFAULT_AVATAR =
   'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop';
+const pipelineRepo = createPrismaProductRepo(prisma);
 
 function getAuthUser(req, db) {
   const header = req.headers.authorization ?? '';
@@ -193,7 +215,25 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/auth/register') {
     try {
       const { name, email, password, skinType } = await readValidatedBody(req, registerSchema);
-      if (db.users.some((user) => user.email.toLowerCase() === email)) {
+      const existingUser = db.users.find((user) => user.email.toLowerCase() === email);
+      if (existingUser) {
+        // Allow google-only accounts to be upgraded to password login without
+        // creating a duplicate user row.
+        if (!existingUser.passwordHash && existingUser.googleSub) {
+          existingUser.passwordHash = hashPassword(password);
+          existingUser.name = existingUser.name || name;
+          existingUser.skinType =
+            existingUser.skinType && existingUser.skinType !== 'Not set'
+              ? existingUser.skinType
+              : skinType;
+          existingUser.emailVerified = true;
+          await writeDb(db);
+          return json(res, 200, {
+            token: signToken(existingUser.id, config.tokenSecret),
+            user: toUserDto(existingUser),
+            upgradedFromGoogleOnly: true
+          });
+        }
         return json(res, 409, { error: 'Email already exists' });
       }
       const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`;
@@ -618,6 +658,119 @@ const server = createServer(async (req, res) => {
     return json(res, 200, { runs });
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/admin/pipeline/run') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const payload = await readValidatedBody(req, pipelineRunSchema);
+      const amazonSource = amazonItemToProductSource(payload.amazon);
+
+      const adapterByRetailer = {
+        sephora: sephoraImportedToProductSource,
+        ulta: ultaItemToProductSource,
+        brand_official: brandOfficialToProductSource
+      };
+      const explicitCandidates = payload.candidates.map((candidate) =>
+        adapterByRetailer[candidate.retailer](candidate.payload)
+      );
+      const discovered = payload.autoDiscoverCandidates
+        ? await discoverCandidateSources(amazonSource, payload.candidateLimit)
+        : [];
+
+      const deduped = [];
+      const seen = new Set();
+      for (const candidate of [...explicitCandidates, ...discovered]) {
+        const key = `${candidate.retailer}:${candidate.sourceItemId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(candidate);
+      }
+
+      const result = await runImportAndEnrichPipeline({
+        amazonSource,
+        candidateSources: deduped,
+        repo: pipelineRepo
+      });
+
+      return json(res, 200, toPipelineResultDto(result));
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/pipeline/review-candidates') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const query = parseOrThrow(pipelineReviewQuerySchema, {
+        limit: url.searchParams.get('limit') ?? 50
+      });
+      const rows = await prisma.productMatchCandidate.findMany({
+        where: { decision: 'needs_review' },
+        orderBy: { updatedAt: 'desc' },
+        take: query.limit
+      });
+      const sourceIds = [
+        ...new Set(rows.flatMap((row) => [row.amazonSourceId, row.enrichmentSourceId]))
+      ];
+      const sources = sourceIds.length
+        ? await prisma.productSource.findMany({ where: { id: { in: sourceIds } } })
+        : [];
+      const sourceMap = new Map(sources.map((source) => [source.id, materializeProductSourceFromDbRow(source)]));
+
+      const items = rows.map((row) => ({
+        id: row.id,
+        confidence: row.confidence,
+        decision: row.decision,
+        reasons: safeParseJson(row.reasonsJson, []),
+        warnings: safeParseJson(row.warningsJson, []),
+        breakdown: safeParseJson(row.breakdownJson, {}),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        amazonSource: sourceMap.get(row.amazonSourceId) ?? null,
+        enrichmentSource: sourceMap.get(row.enrichmentSourceId) ?? null
+      }));
+
+      return json(res, 200, { items });
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/pipeline/runs') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const query = parseOrThrow(pipelineReviewQuerySchema, {
+        limit: url.searchParams.get('limit') ?? 20
+      });
+      const runs = await listPipelineRuns({ limit: query.limit });
+      return json(res, 200, { runs });
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/pipeline/reprocess') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const body = await parseBody(req).catch(() => ({}));
+      const payload = parseOrThrow(pipelineReprocessSchema, body ?? {});
+      const summary = await reprocessAmazonSources({
+        limit: payload.limit,
+        statuses: payload.statuses,
+        autoDiscoverCandidates: payload.autoDiscoverCandidates,
+        candidateLimit: payload.candidateLimit,
+        trigger: 'admin',
+        logger: console
+      });
+      return json(res, 200, summary);
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/admin/restore') {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
@@ -742,4 +895,5 @@ server.listen(config.port, async () => {
   await ensureDb();
   console.log(`lillasy backend listening on http://localhost:${config.port}`);
   startSephoraScheduler({ logger: console });
+  startProductPipelineScheduler({ logger: console });
 });

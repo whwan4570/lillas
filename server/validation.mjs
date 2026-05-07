@@ -166,6 +166,37 @@ export const sephoraCrawlOptionsSchema = z.object({
   maxRetries: z.coerce.number().int().min(1).max(10).optional()
 }).default({});
 
+const pipelineRetailerEnum = z.enum(['sephora', 'ulta', 'brand_official']);
+const unknownObjectSchema = z.object({}).passthrough();
+
+export const pipelineRunSchema = z.object({
+  amazon: unknownObjectSchema,
+  candidates: z
+    .array(
+      z.object({
+        retailer: pipelineRetailerEnum,
+        payload: unknownObjectSchema
+      })
+    )
+    .max(200)
+    .default([]),
+  autoDiscoverCandidates: z.coerce.boolean().default(true),
+  candidateLimit: z.coerce.number().int().min(1).max(300).default(60)
+});
+
+export const pipelineReviewQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50)
+});
+
+const pipelineReprocessStatusEnum = z.enum(['comparison_only', 'needs_review', 'draft', 'active', 'rejected']);
+
+export const pipelineReprocessSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(25),
+  statuses: z.array(pipelineReprocessStatusEnum).max(10).default(['comparison_only']),
+  autoDiscoverCandidates: z.coerce.boolean().default(true),
+  candidateLimit: z.coerce.number().int().min(1).max(300).default(60)
+});
+
 export function parseOrThrow(schema, payload) {
   const result = schema.safeParse(payload);
   if (result.success) return result.data;

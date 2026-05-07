@@ -3,6 +3,8 @@ import {
   createPostSchema,
   parseOrThrow,
   passwordResetSchema,
+  pipelineReprocessSchema,
+  pipelineRunSchema,
   registerSchema,
   savedProductsSchema,
   skinTestAnswersSchema
@@ -63,5 +65,22 @@ describe('request validation', () => {
         images: ['javascript:alert(1)']
       })
     ).toThrow(/Image/);
+  });
+
+  it('normalizes pipeline run payload defaults', () => {
+    const parsed = parseOrThrow(pipelineRunSchema, {
+      amazon: { ASIN: 'B07L3QJZQX' }
+    });
+    expect(parsed.autoDiscoverCandidates).toBe(true);
+    expect(parsed.candidateLimit).toBe(60);
+    expect(parsed.candidates).toEqual([]);
+  });
+
+  it('normalizes pipeline reprocess defaults and status list', () => {
+    const parsed = parseOrThrow(pipelineReprocessSchema, {});
+    expect(parsed.limit).toBe(25);
+    expect(parsed.statuses).toEqual(['comparison_only']);
+    expect(parsed.autoDiscoverCandidates).toBe(true);
+    expect(parsed.candidateLimit).toBe(60);
   });
 });

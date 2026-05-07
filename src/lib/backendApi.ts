@@ -66,6 +66,57 @@ export interface CreatorItem {
   avatar: string;
 }
 
+export interface PipelineRunItem {
+  id: number;
+  trigger: string;
+  status: string;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  statuses: string[];
+  errorMessage: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface PipelineReviewCandidate {
+  id: number;
+  confidence: number;
+  decision: string;
+  reasons: string[];
+  warnings: string[];
+  breakdown: Record<string, number>;
+  createdAt: string;
+  updatedAt: string;
+  amazonSource: {
+    id: number;
+    sourceItemId: string;
+    brand: string | null;
+    name: string | null;
+    retailer: string;
+  } | null;
+  enrichmentSource: {
+    id: number;
+    sourceItemId: string;
+    brand: string | null;
+    name: string | null;
+    retailer: string;
+  } | null;
+}
+
+export interface PipelineReprocessSummary {
+  runId?: number;
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  items: Array<{
+    amazonSourceId: number;
+    amazonSourceItemId: string;
+    ok: boolean;
+    error?: string;
+  }>;
+}
+
 interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   token?: string | null;
@@ -248,5 +299,34 @@ export async function verifyEmail(verifyToken: string) {
   return apiRequest<{ user: AuthUser }>('/auth/email/verify', {
     method: 'POST',
     body: { token: verifyToken }
+  });
+}
+
+export async function getPipelineRuns(token: string, limit = 20) {
+  return apiRequest<{ runs: PipelineRunItem[] }>(`/admin/pipeline/runs?limit=${encodeURIComponent(String(limit))}`, {
+    token
+  });
+}
+
+export async function getPipelineReviewCandidates(token: string, limit = 50) {
+  return apiRequest<{ items: PipelineReviewCandidate[] }>(
+    `/admin/pipeline/review-candidates?limit=${encodeURIComponent(String(limit))}`,
+    { token }
+  );
+}
+
+export async function triggerPipelineReprocess(
+  token: string,
+  payload: {
+    limit?: number;
+    statuses?: string[];
+    autoDiscoverCandidates?: boolean;
+    candidateLimit?: number;
+  } = {}
+) {
+  return apiRequest<PipelineReprocessSummary>('/admin/pipeline/reprocess', {
+    method: 'POST',
+    token,
+    body: payload
   });
 }

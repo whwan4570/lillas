@@ -8,6 +8,7 @@ import { ComparisonPage } from './components/pages/ComparisonPage';
 import { CommunityPage } from './components/pages/CommunityPage';
 import { DashboardPage } from './components/pages/DashboardPage';
 import { FollowingManagePage } from './components/pages/FollowingManagePage';
+import { AdminPipelinePage } from './components/pages/AdminPipelinePage';
 import { AuthModal } from './components/AuthModal';
 import { ProfileEditModal } from './components/ProfileEditModal';
 import { PasswordResetModal } from './components/PasswordResetModal';
@@ -423,6 +424,14 @@ export default function App() {
               setProfileModalError(null);
               setIsProfileModalOpen(true);
             }}
+            onOpenAdmin={() => setCurrentPage('admin')}
+          />
+        );
+      case 'admin':
+        return (
+          <AdminPipelinePage
+            authToken={authToken}
+            onRequireLogin={(onSuccess) => openAuthModal('login', onSuccess)}
           />
         );
       default:

@@ -600,6 +600,50 @@ export async function getLastSuccessfulCrawlerRun(source = 'sephora') {
   return row ? toCrawlerRunDto(row) : null;
 }
 
+export async function startPipelineRun({ trigger = 'manual', statuses = [] } = {}) {
+  await ensureSqlSchema();
+  const row = await prisma.pipelineRun.create({
+    data: {
+      trigger,
+      status: 'running',
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      statusesJson: stringifyJson(Array.isArray(statuses) ? statuses : [])
+    }
+  });
+  return toPipelineRunDto(row);
+}
+
+export async function finishPipelineRun(
+  runId,
+  { status, processed, succeeded, failed, statuses = [], errorMessage = null } = {}
+) {
+  await ensureSqlSchema();
+  await prisma.pipelineRun.update({
+    where: { id: Number(runId) },
+    data: {
+      completedAt: new Date(),
+      status: status ?? 'completed',
+      processed: Number(processed) || 0,
+      succeeded: Number(succeeded) || 0,
+      failed: Number(failed) || 0,
+      statusesJson: stringifyJson(Array.isArray(statuses) ? statuses : []),
+      errorMessage: errorMessage ? String(errorMessage).slice(0, 1000) : null
+    }
+  });
+}
+
+export async function listPipelineRuns({ limit = 20 } = {}) {
+  await ensureSqlSchema();
+  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 20));
+  const rows = await prisma.pipelineRun.findMany({
+    orderBy: { id: 'desc' },
+    take: safeLimit
+  });
+  return rows.map(toPipelineRunDto);
+}
+
 function toCrawlerRunDto(row) {
   return {
     id: row.id,
@@ -609,6 +653,21 @@ function toCrawlerRunDto(row) {
     processed: row.processed,
     succeeded: row.succeeded,
     failed: row.failed,
+    errorMessage: row.errorMessage,
+    startedAt: toIsoString(row.startedAt),
+    completedAt: toIsoString(row.completedAt)
+  };
+}
+
+function toPipelineRunDto(row) {
+  return {
+    id: row.id,
+    trigger: row.trigger,
+    status: row.status,
+    processed: row.processed,
+    succeeded: row.succeeded,
+    failed: row.failed,
+    statuses: parseJson(row.statusesJson, []),
     errorMessage: row.errorMessage,
     startedAt: toIsoString(row.startedAt),
     completedAt: toIsoString(row.completedAt)
@@ -865,6 +924,21 @@ async function ensureSqlSchemaSqlite() {
       "processed" INTEGER NOT NULL DEFAULT 0,
       "succeeded" INTEGER NOT NULL DEFAULT 0,
       "failed" INTEGER NOT NULL DEFAULT 0,
+      "errorMessage" TEXT
+    )
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "PipelineRun" (
+      "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+      "startedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "completedAt" DATETIME,
+      "status" TEXT NOT NULL,
+      "trigger" TEXT NOT NULL,
+      "processed" INTEGER NOT NULL DEFAULT 0,
+      "succeeded" INTEGER NOT NULL DEFAULT 0,
+      "failed" INTEGER NOT NULL DEFAULT 0,
+      "statusesJson" TEXT NOT NULL DEFAULT '[]',
       "errorMessage" TEXT
     )
   `);

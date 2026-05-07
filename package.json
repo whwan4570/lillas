@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:server": "node server/index.mjs",
     "import:sephora:seed": "node server/importSephoraSeed.mjs",
+    "import:pipeline:demo": "node server/seedProductPipeline.mjs",
     "crawl:sephora": "node server/runSephoraCrawl.mjs",
     "db:backfill:sephora": "node server/backfillImportedProducts.mjs",
     "prisma:generate": "prisma generate",

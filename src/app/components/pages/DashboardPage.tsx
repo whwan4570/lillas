@@ -34,6 +34,7 @@ interface DashboardPageProps {
   onSelectProduct: (productId: number, targetPage?: string) => void;
   onToggleSaved: (productId: number) => void;
   onEditProfile: () => void;
+  onOpenAdmin: () => void;
 }
 
 export function DashboardPage({
@@ -45,7 +46,8 @@ export function DashboardPage({
   onRequireLogin,
   onSelectProduct,
   onToggleSaved,
-  onEditProfile
+  onEditProfile,
+  onOpenAdmin
 }: DashboardPageProps) {
   const [selectedTab, setSelectedTab] = useState('saved');
   const [creators, setCreators] = useState<CreatorItem[]>([]);
@@ -279,6 +281,10 @@ export function DashboardPage({
                 <button onClick={onEditProfile} className={`${primaryButton} w-full mb-2.5`}>
                   <Settings className="w-4 h-4" />
                   Edit Profile
+                </button>
+                <button onClick={onOpenAdmin} className={`${secondaryButton} w-full mb-2.5`}>
+                  <Package className="w-4 h-4" />
+                  Admin Pipeline
                 </button>
                 <button
                   onClick={() => onNavigate('skin-test')}

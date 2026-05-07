@@ -162,3 +162,166 @@ model CrawlerRun {
   failed         Int       @default(0)
   errorMessage   String?
 }
+
+model PipelineRun {
+  id           Int       @id @default(autoincrement())
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  status       String
+  trigger      String
+  processed    Int       @default(0)
+  succeeded    Int       @default(0)
+  failed       Int       @default(0)
+  statusesJson String    @default("[]")
+  errorMessage String?
+}
+
+// ----------------------------------------------------------------------------
+// Canonical product catalog (multi-retailer pipeline)
+//
+// Raw retailer payloads land in `ProductSource`. Amazon is the primary product
+// discovery surface (one ProductSource per ASIN). Sephora / Ulta / official
+// brand pages are enrichment surfaces and also live in ProductSource. The
+// matcher links Amazon sources to enrichment sources via
+// `ProductMatchCandidate` with a confidence score; high-confidence matches are
+// promoted into a single canonical `Product` row that the app reads from.
+// ----------------------------------------------------------------------------
+
+model Product {
+  id                     Int      @id @default(autoincrement())
+  slug                   String   @unique
+  canonicalName          String
+  canonicalBrand         String
+  category               String?
+  status                 String   @default("draft") // draft | comparison_only | active | rejected
+  recommendationEligible Boolean  @default(false)
+  imageUrl               String?
+  sizeMl                 Float?
+  sizeOz                 Float?
+  description            String?
+  warningsJson           String   @default("[]")
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  sources           ProductSource[]
+  ingredients       ProductIngredient[]
+  offers            Offer[]
+  featureSnapshots  ProductFeatureSnapshot[]
+
+  @@index([canonicalBrand])
+  @@index([status])
+}
+
+model ProductSource {
+  id              Int      @id @default(autoincrement())
+  retailer        String   // amazon | sephora | ulta | brand_official
+  sourceItemId   String   // ASIN, Sephora item id, Ulta sku, brand slug, ...
+  sourceUrl       String?
+  productId       Int?
+  product         Product? @relation(fields: [productId], references: [id])
+  brand           String?
+  name            String?
+  category        String?
+  sizeRaw         String?
+  sizeMl          Float?
+  sizeOz          Float?
+  imageUrl        String?
+  priceAmount     Float?
+  priceCurrency   String?
+  ingredientsText String?
+  inciIngredientsJson String @default("[]")
+  rawJson         String   @default("{}")
+  fetchedAt       DateTime @default(now())
+  schemaVersion   Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([retailer, sourceItemId])
+  @@index([brand])
+  @@index([productId])
+}
+
+model ProductMatchCandidate {
+  id                 Int      @id @default(autoincrement())
+  amazonSourceId     Int
+  enrichmentSourceId Int
+  confidence         Float
+  decision           String   // auto_match | needs_review | rejected
+  reasonsJson        String   @default("[]")
+  warningsJson       String   @default("[]")
+  breakdownJson      String   @default("{}")
+  appliedAt          DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([amazonSourceId, enrichmentSourceId])
+  @@index([decision])
+  @@index([amazonSourceId])
+}
+
+model Offer {
+  id            Int      @id @default(autoincrement())
+  productId     Int
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  retailer      String   // amazon | sephora | ulta | brand_official
+  // Non-nullable so the (productId, retailer, sourceItemId) compound unique key
+  // works through Prisma's compound-unique upsert input. Use "" when the
+  // retailer doesn't expose a stable item id.
+  sourceItemId  String   @default("")
+  url           String
+  priceAmount   Float?
+  priceCurrency String?
+  inStock       Boolean  @default(true)
+  fetchedAt     DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([productId, retailer, sourceItemId])
+  @@index([retailer])
+}
+
+model Ingredient {
+  id            Int      @id @default(autoincrement())
+  canonicalName String   @unique
+  inciName      String?
+  aliasesJson   String   @default("[]")
+  category      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  productLinks ProductIngredient[]
+}
+
+model ProductIngredient {
+  id           Int        @id @default(autoincrement())
+  productId    Int
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredientId Int
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  position     Int
+  source       String     // sephora | ulta | brand_official | amazon
+  confidence   Float
+  rawText      String?
+  createdAt    DateTime   @default(now())
+
+  @@unique([productId, ingredientId, source])
+  @@index([productId])
+  @@index([ingredientId])
+}
+
+model ProductFeatureSnapshot {
+  id             Int      @id @default(autoincrement())
+  productId      Int
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source         String   // sephora | ulta | brand_official
+  whatItIs       String?
+  formulation    String?
+  description    String?
+  skinTypesJson  String   @default("[]")
+  concernsJson   String   @default("[]")
+  highlightsJson String   @default("[]")
+  capturedAt     DateTime @default(now())
+
+  @@unique([productId, source])
+  @@index([productId])
+}
