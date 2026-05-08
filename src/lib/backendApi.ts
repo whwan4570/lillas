@@ -360,3 +360,97 @@ export async function triggerPipelineReprocess(
     body: payload
   });
 }
+
+export interface AmazonIngestItem {
+  asin: string;
+  title: string;
+  brand?: string;
+  url?: string;
+  imageUrl?: string;
+  priceAmount?: number;
+  priceCurrency?: string;
+  category?: string;
+  size?: string;
+  ingredientsText?: string;
+}
+
+export interface AmazonIngestResultItem {
+  asin: string;
+  ok: boolean;
+  error?: string;
+  result?: {
+    product: { id: number | null; slug: string | null; status: string | null; recommendationEligible: boolean };
+    amazonSourceId: number | null;
+    topCandidate: {
+      retailer: string | null;
+      sourceItemId: string | null;
+      confidence: number;
+      decision: string;
+      reasons: string[];
+      warnings: string[];
+    } | null;
+    candidateCount: number;
+    promotion: { status: string; recommendationEligible: boolean; warnings: string[]; reasons: string[] };
+  };
+}
+
+export interface AmazonIngestSummary {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  items: AmazonIngestResultItem[];
+  fetched?: number;
+  skipped?: Array<{ asin: string | null; reason: string; message?: string | null }>;
+  marketplace?: string | null;
+}
+
+export async function ingestAmazonBatch(
+  token: string,
+  payload: {
+    items: AmazonIngestItem[];
+    autoDiscoverCandidates?: boolean;
+    candidateLimit?: number;
+  }
+) {
+  return apiRequest<AmazonIngestSummary>('/admin/amazon/ingest-batch', {
+    method: 'POST',
+    token,
+    body: payload
+  });
+}
+
+export async function getAmazonPaApiStatus(token: string) {
+  return apiRequest<{ configured: boolean }>('/admin/amazon/paapi-status', { token });
+}
+
+export async function fetchAmazonByAsinAndIngest(
+  token: string,
+  payload: {
+    asins: string[];
+    autoDiscoverCandidates?: boolean;
+    candidateLimit?: number;
+    marketplace?: string;
+  }
+) {
+  return apiRequest<AmazonIngestSummary>('/admin/amazon/fetch-and-ingest', {
+    method: 'POST',
+    token,
+    body: payload
+  });
+}
+
+export async function approveMatchCandidate(
+  token: string,
+  candidateId: number,
+  payload: { candidateLimit?: number } = {}
+) {
+  return apiRequest<{
+    approved: true;
+    candidateId: number;
+    result: AmazonIngestResultItem['result'];
+  }>(`/admin/pipeline/match-candidates/${candidateId}/approve`, {
+    method: 'POST',
+    token,
+    body: payload
+  });
+}

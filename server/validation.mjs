@@ -197,6 +197,47 @@ export const pipelineReprocessSchema = z.object({
   candidateLimit: z.coerce.number().int().min(1).max(300).default(60)
 });
 
+// Lightweight Amazon item used by the batch ingestion endpoint. The caller
+// supplies normalized fields; the backend reshapes them into the raw payload
+// shape that `amazonItemToProductSource` expects.
+export const amazonIngestItemSchema = z
+  .object({
+    asin: z.string().trim().min(3).max(32),
+    title: z.string().trim().min(1).max(500),
+    brand: z.string().trim().min(1).max(200).optional(),
+    url: z.string().trim().url().optional(),
+    priceAmount: z.coerce.number().positive().max(100_000).optional(),
+    priceCurrency: z.string().trim().min(3).max(3).optional(),
+    imageUrl: z.string().trim().url().optional(),
+    category: z.string().trim().max(200).optional(),
+    size: z.string().trim().max(200).optional(),
+    ingredientsText: z.string().trim().max(20_000).optional()
+  })
+  .strict();
+
+export const amazonBatchIngestSchema = z.object({
+  items: z.array(amazonIngestItemSchema).min(1).max(100),
+  autoDiscoverCandidates: z.coerce.boolean().default(true),
+  candidateLimit: z.coerce.number().int().min(1).max(300).default(60)
+});
+
+export const matchCandidateApproveSchema = z.object({
+  candidateLimit: z.coerce.number().int().min(1).max(300).default(60)
+});
+
+// Used by the PA API admin endpoint - the caller only needs to send ASINs;
+// the backend resolves brand/title/image/price/size via PA API and feeds
+// them into the existing batch ingestion logic.
+export const amazonAsinFetchSchema = z.object({
+  asins: z
+    .array(z.string().trim().min(3).max(32))
+    .min(1)
+    .max(10),
+  autoDiscoverCandidates: z.coerce.boolean().default(true),
+  candidateLimit: z.coerce.number().int().min(1).max(300).default(60),
+  marketplace: z.string().trim().min(3).max(40).optional()
+});
+
 export function parseOrThrow(schema, payload) {
   const result = schema.safeParse(payload);
   if (result.success) return result.data;

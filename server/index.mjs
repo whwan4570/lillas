@@ -31,6 +31,11 @@ import {
   sephoraImportedToProductSource,
   ultaItemToProductSource
 } from './productSourceAdapters.mjs';
+import {
+  fetchItemsByAsin,
+  isAmazonProductApiConfigured,
+  paApiItemToIngestPayload
+} from './amazonProductApi.mjs';
 import { standardizeProduct } from './sephoraSchema.mjs';
 import { listRecentSephoraRuns, runSephoraCrawl } from './sephoraRunner.mjs';
 import { startSephoraScheduler } from './sephoraScheduler.mjs';
@@ -48,6 +53,9 @@ import {
   createPostSchema,
   loginSchema,
   parseOrThrow,
+  amazonAsinFetchSchema,
+  amazonBatchIngestSchema,
+  matchCandidateApproveSchema,
   passwordResetRequestSchema,
   passwordResetSchema,
   pipelineReprocessSchema,
@@ -78,6 +86,47 @@ function getAuthUser(req, db) {
   const userId = verifyToken(token, config.tokenSecret);
   if (!userId) return null;
   return db.users.find((user) => user.id === userId) ?? null;
+}
+
+// Shared runner used by both the manual `/api/admin/amazon/ingest-batch` and
+// the PA-API-driven `/api/admin/amazon/fetch-and-ingest` endpoints.
+async function runAmazonBatchIngest(payload) {
+  const items = [];
+  let succeeded = 0;
+  let failed = 0;
+  for (const raw of payload.items) {
+    const amazonInput = {
+      ASIN: raw.asin,
+      title: raw.title,
+      brand: raw.brand,
+      url: raw.url,
+      imageUrl: raw.imageUrl,
+      priceAmount: raw.priceAmount,
+      priceCurrency: raw.priceCurrency,
+      category: raw.category,
+      size: raw.size,
+      ingredientsText: raw.ingredientsText
+    };
+    try {
+      const amazonSource = amazonItemToProductSource(amazonInput);
+      const discovered = payload.autoDiscoverCandidates
+        ? await discoverCandidateSources(amazonSource, payload.candidateLimit)
+        : [];
+      const result = await runImportAndEnrichPipeline({
+        amazonSource,
+        candidateSources: discovered,
+        repo: pipelineRepo
+      });
+      succeeded += 1;
+      items.push({ asin: raw.asin, ok: true, result: toPipelineResultDto(result) });
+    } catch (error) {
+      failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[amazon-ingest] failed ${raw.asin}: ${message}`);
+      items.push({ asin: raw.asin, ok: false, error: message });
+    }
+  }
+  return { attempted: payload.items.length, succeeded, failed, items };
 }
 
 function toUserDto(user) {
@@ -828,6 +877,115 @@ const server = createServer(async (req, res) => {
       });
 
       return json(res, 200, toPipelineResultDto(result));
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/amazon/ingest-batch') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const payload = await readValidatedBody(req, amazonBatchIngestSchema);
+      const summary = await runAmazonBatchIngest(payload);
+      return json(res, 200, summary);
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/admin/amazon/paapi-status') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    return json(res, 200, { configured: isAmazonProductApiConfigured() });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/admin/amazon/fetch-and-ingest') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    if (!isAmazonProductApiConfigured()) {
+      return json(res, 400, {
+        error:
+          'Amazon PA API not configured. Set AMAZON_PA_API_ACCESS_KEY, AMAZON_PA_API_SECRET_KEY, AMAZON_PA_API_PARTNER_TAG.'
+      });
+    }
+    try {
+      const payload = await readValidatedBody(req, amazonAsinFetchSchema);
+      const paResponse = await fetchItemsByAsin(payload.asins, {
+        marketplace: payload.marketplace
+      });
+      const itemsRaw = paResponse?.ItemsResult?.Items ?? [];
+      const ingestItems = [];
+      const skipped = [];
+      for (const item of itemsRaw) {
+        const ingest = paApiItemToIngestPayload(item);
+        if (ingest) ingestItems.push(ingest);
+        else skipped.push({ asin: item?.ASIN ?? null, reason: 'paapi_payload_unusable' });
+      }
+      const errors = paResponse?.Errors ?? [];
+      for (const err of errors) {
+        skipped.push({
+          asin: err?.Code === 'NoResults' ? null : err?.ASIN ?? null,
+          reason: err?.Code ?? 'paapi_error',
+          message: err?.Message ?? null
+        });
+      }
+
+      let summary = { attempted: 0, succeeded: 0, failed: 0, items: [] };
+      if (ingestItems.length) {
+        summary = await runAmazonBatchIngest({
+          items: ingestItems,
+          autoDiscoverCandidates: payload.autoDiscoverCandidates,
+          candidateLimit: payload.candidateLimit
+        });
+      }
+      return json(res, 200, {
+        ...summary,
+        fetched: ingestItems.length,
+        skipped,
+        marketplace: payload.marketplace ?? null
+      });
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
+  if (req.method === 'POST' && /^\/api\/admin\/pipeline\/match-candidates\/\d+\/approve$/.test(url.pathname)) {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const candidateId = Number(url.pathname.split('/')[5]);
+      const body = await parseBody(req).catch(() => ({}));
+      const opts = parseOrThrow(matchCandidateApproveSchema, body ?? {});
+      const candidate = await prisma.productMatchCandidate.findUnique({ where: { id: candidateId } });
+      if (!candidate) return json(res, 404, { error: 'Match candidate not found' });
+      const [amazonRow, enrichmentRow] = await Promise.all([
+        prisma.productSource.findUnique({ where: { id: candidate.amazonSourceId } }),
+        prisma.productSource.findUnique({ where: { id: candidate.enrichmentSourceId } })
+      ]);
+      if (!amazonRow || amazonRow.retailer !== 'amazon') {
+        return json(res, 400, { error: 'Amazon source missing or invalid' });
+      }
+      if (!enrichmentRow) {
+        return json(res, 400, { error: 'Enrichment source missing' });
+      }
+      const amazonSource = materializeProductSourceFromDbRow(amazonRow);
+      const candidateSources = await discoverCandidateSources(amazonSource, opts.candidateLimit);
+      // Make sure the explicitly approved candidate is in the candidate set.
+      if (!candidateSources.some((entry) => entry.id === enrichmentRow.id)) {
+        candidateSources.push(materializeProductSourceFromDbRow(enrichmentRow));
+      }
+      const result = await runImportAndEnrichPipeline({
+        amazonSource,
+        candidateSources,
+        repo: pipelineRepo,
+        forceApplyEnrichmentSourceId: enrichmentRow.id
+      });
+      return json(res, 200, {
+        approved: true,
+        candidateId,
+        result: toPipelineResultDto(result)
+      });
     } catch (error) {
       return badRequest(res, error);
     }

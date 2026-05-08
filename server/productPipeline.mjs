@@ -34,7 +34,16 @@ const ENRICHMENT_RETAILERS = new Set(['sephora', 'ulta', 'brand_official']);
 // Pipeline entry point
 // ---------------------------------------------------------------------------
 
-export async function runImportAndEnrichPipeline({ amazonSource, candidateSources = [], repo, now = () => new Date() }) {
+export async function runImportAndEnrichPipeline({
+  amazonSource,
+  candidateSources = [],
+  repo,
+  now = () => new Date(),
+  // When set, the candidate matching this enrichment source id is treated as
+  // an auto-match regardless of its computed confidence. Used by the admin
+  // "approve" flow to manually promote a needs_review candidate.
+  forceApplyEnrichmentSourceId = null
+} = {}) {
   if (!amazonSource) throw new Error('runImportAndEnrichPipeline requires an amazonSource');
   if (!repo) throw new Error('runImportAndEnrichPipeline requires a repo');
   if (amazonSource.retailer !== 'amazon') {
@@ -50,7 +59,17 @@ export async function runImportAndEnrichPipeline({ amazonSource, candidateSource
 
   const ranked = rankCandidates(persistedAmazon, persistedCandidates);
 
-  // Persist all candidates with their scores so reviewers can audit later.
+  let forcedEntry = null;
+  if (forceApplyEnrichmentSourceId != null) {
+    forcedEntry = ranked.find((entry) => entry.candidate?.id === forceApplyEnrichmentSourceId) ?? null;
+    if (forcedEntry) {
+      forcedEntry.decision = 'auto_match';
+      forcedEntry.reasons = [...(forcedEntry.reasons ?? []), 'manual_override'];
+    }
+  }
+
+  // Persist all candidates with their (possibly overridden) scores so reviewers
+  // can audit later.
   for (const entry of ranked) {
     await repo.upsertMatchCandidate({
       amazonSourceId: persistedAmazon.id,
@@ -64,7 +83,9 @@ export async function runImportAndEnrichPipeline({ amazonSource, candidateSource
     });
   }
 
-  const top = ranked[0] ?? null;
+  // When the caller forces a specific enrichment source, that candidate becomes
+  // the effective top regardless of its raw confidence rank.
+  const top = forcedEntry ?? ranked[0] ?? null;
   const autoEnrichable = Boolean(top && top.decision === 'auto_match');
 
   const product = await ensureProduct({

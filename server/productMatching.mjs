@@ -18,10 +18,15 @@ export const MATCH_THRESHOLDS = Object.freeze({
   REVIEW: 0.65
 });
 
+// Weights are tuned so that a strong brand+name+category match still hits the
+// AUTO threshold (0.88) when sizes are slightly off (e.g. Amazon's 1.7 fl oz
+// title vs Sephora's "1 fl oz / 30 ml" listing for what is clearly the same
+// SKU). Size mismatch is still a meaningful penalty (see `sizeBoostedScore`)
+// but no longer single-handedly drops a clean match below the threshold.
 const DEFAULT_WEIGHTS = Object.freeze({
-  brand: 0.3,
-  name: 0.4,
-  size: 0.15,
+  brand: 0.32,
+  name: 0.45,
+  size: 0.08,
   category: 0.1,
   variant: 0.05
 });
@@ -319,10 +324,24 @@ export function computeMatchConfidence(amazonSource, candidateSource, opts = {})
 
   if (variantScore < 0.7) warnings.push('variant_mismatch');
 
+  // Soft size boost: when brand + name + category + variant all agree, a
+  // moderate size mismatch (one side missing or only off by ~half) is most
+  // likely conversion noise (ml vs oz, declared vs actual fill volume). Lift
+  // the size component just enough that the overall match still reaches AUTO.
+  // We keep a hard mismatch (sizeScore < 0.4) untouched so 50ml vs 200ml does
+  // not auto-pass.
+  const strongIdentitySignals =
+    brandScore >= 0.99 && nameScore >= 0.7 && categoryScore === 1 && variantScore >= 0.7;
+  const effectiveSizeScore =
+    strongIdentitySignals && sizeScore >= 0.4 ? Math.max(sizeScore, 0.85) : sizeScore;
+  if (effectiveSizeScore !== sizeScore) {
+    reasons.push(`size_boosted:${round(sizeScore)}->${round(effectiveSizeScore)}`);
+  }
+
   const confidence =
     weights.brand * brandScore +
     weights.name * nameScore +
-    weights.size * sizeScore +
+    weights.size * effectiveSizeScore +
     weights.category * categoryScore +
     weights.variant * variantScore;
 
@@ -343,7 +362,8 @@ export function computeMatchConfidence(amazonSource, candidateSource, opts = {})
     breakdown: {
       brand: round(brandScore),
       name: round(nameScore),
-      size: round(sizeScore),
+      size: round(effectiveSizeScore),
+      sizeRaw: round(sizeScore),
       category: round(categoryScore),
       variant: round(variantScore)
     }

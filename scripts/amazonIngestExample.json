@@ -1,0 +1,59 @@
+{
+  "items": [
+    {
+      "asin": "B07L1PHSY9",
+      "title": "Tatcha The Water Cream Refillable Pore Minimizing Moisturizer",
+      "brand": "Tatcha",
+      "url": "https://www.amazon.com/dp/B07L1PHSY9",
+      "imageUrl": "https://m.media-amazon.com/images/I/71QxqXhP2dL._SL1500_.jpg",
+      "priceAmount": 70.0,
+      "priceCurrency": "USD",
+      "category": "Moisturizer",
+      "size": "50 ml"
+    },
+    {
+      "asin": "B00949CTQQ",
+      "title": "Paula's Choice Skin Perfecting 2% BHA Liquid Salicylic Acid Exfoliant",
+      "brand": "Paula's Choice",
+      "url": "https://www.amazon.com/dp/B00949CTQQ",
+      "imageUrl": "https://m.media-amazon.com/images/I/61zfDt-bs0L._SL1500_.jpg",
+      "priceAmount": 35.0,
+      "priceCurrency": "USD",
+      "category": "Exfoliant",
+      "size": "118 ml"
+    },
+    {
+      "asin": "B07ZPKZ6Z3",
+      "title": "Glow Recipe Watermelon Glow Niacinamide Dew Drops Serum",
+      "brand": "Glow Recipe",
+      "url": "https://www.amazon.com/dp/B07ZPKZ6Z3",
+      "imageUrl": "https://m.media-amazon.com/images/I/61ZuQp+KjJL._SL1500_.jpg",
+      "priceAmount": 35.0,
+      "priceCurrency": "USD",
+      "category": "Serum",
+      "size": "40 ml"
+    },
+    {
+      "asin": "B0CZBQHTYR",
+      "title": "rhode Glazing Milk Hydrating Essence",
+      "brand": "rhode",
+      "url": "https://www.amazon.com/dp/B0CZBQHTYR",
+      "imageUrl": "https://m.media-amazon.com/images/I/71YKXuD1lPL._SL1500_.jpg",
+      "priceAmount": 32.0,
+      "priceCurrency": "USD",
+      "category": "Essence",
+      "size": "120 ml"
+    },
+    {
+      "asin": "B074SLNK1Y",
+      "title": "Drunk Elephant B-Hydra Intensive Hydration Serum",
+      "brand": "Drunk Elephant",
+      "url": "https://www.amazon.com/dp/B074SLNK1Y",
+      "imageUrl": "https://m.media-amazon.com/images/I/61KqqM7ZnLL._SL1500_.jpg",
+      "priceAmount": 49.0,
+      "priceCurrency": "USD",
+      "category": "Serum",
+      "size": "47 ml"
+    }
+  ]
+}
