@@ -15,8 +15,8 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ImageWithFallback } from '../ImageWithFallback';
-import { getSeedCatalogProducts, type SeedCatalogProduct } from '../../../data/catalogSeed';
 import {
+  type CatalogProduct,
   getCommunityFeed,
   toggleFollow,
   type AuthUser,
@@ -35,6 +35,7 @@ interface DashboardPageProps {
   onToggleSaved: (productId: number) => void;
   onEditProfile: () => void;
   onOpenAdmin: () => void;
+  catalogProducts: CatalogProduct[];
 }
 
 export function DashboardPage({
@@ -47,7 +48,8 @@ export function DashboardPage({
   onSelectProduct,
   onToggleSaved,
   onEditProfile,
-  onOpenAdmin
+  onOpenAdmin,
+  catalogProducts
 }: DashboardPageProps) {
   const [selectedTab, setSelectedTab] = useState('saved');
   const [creators, setCreators] = useState<CreatorItem[]>([]);
@@ -56,9 +58,8 @@ export function DashboardPage({
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  const catalogProducts = useMemo(() => getSeedCatalogProducts(), []);
   const catalogById = useMemo(() => {
-    const map = new Map<number, SeedCatalogProduct>();
+    const map = new Map<number, CatalogProduct>();
     for (const product of catalogProducts) map.set(product.id, product);
     return map;
   }, [catalogProducts]);
@@ -67,7 +68,7 @@ export function DashboardPage({
     () =>
       savedProductIds
         .map((id) => ({ id, product: catalogById.get(id) }))
-        .filter((entry): entry is { id: number; product: SeedCatalogProduct } => Boolean(entry.product)),
+        .filter((entry): entry is { id: number; product: CatalogProduct } => Boolean(entry.product)),
     [savedProductIds, catalogById]
   );
 
@@ -75,7 +76,7 @@ export function DashboardPage({
     () =>
       recentProductIds
         .map((id) => ({ id, product: catalogById.get(id) }))
-        .filter((entry): entry is { id: number; product: SeedCatalogProduct } => Boolean(entry.product)),
+        .filter((entry): entry is { id: number; product: CatalogProduct } => Boolean(entry.product)),
     [recentProductIds, catalogById]
   );
 
@@ -170,7 +171,7 @@ export function DashboardPage({
     'px-3 py-2 rounded-full border border-border hover:border-primary/40 hover:bg-primary/5 transition-all text-sm flex items-center gap-1.5';
 
   const renderProductCard = (
-    product: SeedCatalogProduct,
+    product: CatalogProduct,
     meta: { badge?: React.ReactNode; action?: React.ReactNode; index: number }
   ) => (
     <motion.div
@@ -205,7 +206,7 @@ export function DashboardPage({
         </div>
         <div className="flex items-center justify-between">
           <span className="text-lg" style={{ fontFamily: 'var(--font-serif)', fontWeight: 500 }}>
-            ${product.price}
+            {product.price != null ? `$${product.price}` : 'See price'}
           </span>
           {meta.action}
         </div>

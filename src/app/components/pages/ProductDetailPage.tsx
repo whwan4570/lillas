@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { Star, Heart, Share2, ChevronRight, Check, ShoppingBag, AlertCircle, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ImageWithFallback } from '../ImageWithFallback';
-import { getSeedCatalogProducts } from '../../../data/catalogSeed';
 import {
   explainProduct,
   ingredientMap,
@@ -10,6 +9,7 @@ import {
   type Product,
   type UserProfile
 } from '../../../lib/recommendationEngine';
+import type { CatalogProduct } from '../../../lib/backendApi';
 
 interface ProductDetailPageProps {
   onNavigate: (page: string) => void;
@@ -18,6 +18,7 @@ interface ProductDetailPageProps {
   isSaved: boolean;
   onToggleSaved: (productId: number) => void;
   onSelectProduct: (productId: number, targetPage?: string) => void;
+  catalogProducts: CatalogProduct[];
 }
 
 export function ProductDetailPage({
@@ -26,13 +27,24 @@ export function ProductDetailPage({
   userProfile,
   isSaved,
   onToggleSaved,
-  onSelectProduct
+  onSelectProduct,
+  catalogProducts
 }: ProductDetailPageProps) {
   const [selectedTab, setSelectedTab] = useState('overview');
   const product = useMemo(
-    () => getSeedCatalogProducts().find((item) => item.id === selectedProductId) ?? getSeedCatalogProducts()[0],
-    [selectedProductId]
+    () =>
+      catalogProducts.find((item) => item.id === selectedProductId) ?? catalogProducts[0] ?? null,
+    [catalogProducts, selectedProductId]
   );
+  if (!product) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-card to-muted/30 py-12">
+        <div className="max-w-4xl mx-auto px-4 text-center text-muted-foreground">
+          No catalog products available yet.
+        </div>
+      </div>
+    );
+  }
   const productSites = [
     { name: 'Sephora', price: 42, rating: 4.8, reviews: 1523, stock: true },
     { name: 'Ulta', price: 40, rating: 4.7, reviews: 892, stock: true },
@@ -83,7 +95,7 @@ export function ProductDetailPage({
         <div className="grid lg:grid-cols-2 gap-12 mb-16">
           <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="sticky top-24 h-fit">
             <div className="aspect-square rounded-3xl overflow-hidden bg-muted shadow-2xl border border-border/50 relative">
-              <ImageWithFallback src={product.image} alt={product.name} className="w-full h-full object-cover" />
+              <ImageWithFallback src={product.image ?? undefined} alt={product.name} className="w-full h-full object-cover" />
               <div className="absolute top-6 right-6 flex gap-3">
                 <button
                   onClick={() => onToggleSaved(product.id)}

@@ -1,14 +1,15 @@
 import { ArrowRight, Sparkles, TestTube, TrendingUp, Users, Shield, Star } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ImageWithFallback } from '../ImageWithFallback';
-import { getSeedCatalogProducts } from '../../../data/catalogSeed';
+import type { CatalogProduct } from '../../../lib/backendApi';
 
 interface LandingPageProps {
   onNavigate: (page: string) => void;
+  catalogProducts: CatalogProduct[];
 }
 
-export function LandingPage({ onNavigate }: LandingPageProps) {
-  const popularProducts = getSeedCatalogProducts()
+export function LandingPage({ onNavigate, catalogProducts }: LandingPageProps) {
+  const popularProducts = catalogProducts
     .slice(0, 4)
     .map((p) => ({
       name: p.name,
@@ -20,7 +21,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       image: p.image
     }));
 
-  const catalogCount = getSeedCatalogProducts().length;
+  const catalogCount = catalogProducts.length;
 
   const concerns = [
     { name: 'Hydration', icon: '💧', color: 'from-blue-100 to-blue-50' },
@@ -147,7 +148,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
                       className="aspect-square rounded-2xl bg-gradient-to-br from-muted to-muted/50 overflow-hidden"
                     >
                       <ImageWithFallback
-                        src={popularProducts[i - 1]?.image}
+                        src={popularProducts[i - 1]?.image ?? undefined}
                         alt=""
                         className="w-full h-full object-cover"
                       />
@@ -231,7 +232,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               >
                 <div className="aspect-square overflow-hidden bg-muted relative">
                   <ImageWithFallback
-                    src={product.image}
+                    src={product.image ?? undefined}
                     alt={product.name}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />

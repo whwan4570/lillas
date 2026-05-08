@@ -30,6 +30,30 @@ export interface ProductAttachment {
   warning: string | null;
 }
 
+export interface CatalogProductSite {
+  name: string;
+  price: number;
+  rating: number;
+}
+
+export interface CatalogProduct {
+  id: number;
+  sourceId: string;
+  name: string;
+  brand: string;
+  price: number | null;
+  rating: number;
+  reviews: number;
+  matchScore: number;
+  image?: string | null;
+  category: string;
+  categoryLabel: string;
+  keyIngredients: string[];
+  benefits: string[];
+  cautionIngredients: string[];
+  sites: CatalogProductSite[];
+}
+
 export interface CommentItem {
   id: number;
   authorId: string;
@@ -306,6 +330,12 @@ export async function getPipelineRuns(token: string, limit = 20) {
   return apiRequest<{ runs: PipelineRunItem[] }>(`/admin/pipeline/runs?limit=${encodeURIComponent(String(limit))}`, {
     token
   });
+}
+
+export async function getCatalogProducts(limit = 200) {
+  return apiRequest<{ products: CatalogProduct[] }>(
+    `/catalog/products?limit=${encodeURIComponent(String(limit))}`
+  );
 }
 
 export async function getPipelineReviewCandidates(token: string, limit = 50) {

@@ -15,7 +15,6 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { ImageWithFallback } from '../ImageWithFallback';
 import type { SkinTestAnswers } from '../../types';
-import { getSeedCatalogProducts, type SeedCatalogProduct } from '../../../data/catalogSeed';
 import {
   buildUserProfile,
   explainProduct,
@@ -24,6 +23,7 @@ import {
   type Product
 } from '../../../lib/recommendationEngine';
 import {
+  type CatalogProduct,
   addPostComment,
   createCommunityPost,
   getCommunityFeed,
@@ -42,6 +42,7 @@ interface CommunityPageProps {
   authToken: string | null;
   authUser: AuthUser | null;
   onRequireLogin: (onSuccess?: () => void) => void;
+  catalogProducts: CatalogProduct[];
 }
 
 type PendingIntent =
@@ -51,7 +52,7 @@ type PendingIntent =
   | { type: 'createPost' }
   | null;
 
-function toEngineProduct(product: SeedCatalogProduct): Product {
+function toEngineProduct(product: CatalogProduct): Product {
   const ingredients = [...product.keyIngredients, ...product.cautionIngredients].map((v) =>
     v.toLowerCase()
   );
@@ -76,7 +77,8 @@ export function CommunityPage({
   skinTestAnswers,
   authToken,
   authUser,
-  onRequireLogin
+  onRequireLogin,
+  catalogProducts
 }: CommunityPageProps) {
   const [selectedFilter, setSelectedFilter] = useState('for-you');
   const [draftContent, setDraftContent] = useState('');
@@ -96,8 +98,6 @@ export function CommunityPage({
   const [pendingIntent, setPendingIntent] = useState<PendingIntent>(null);
 
   const userProfile = useMemo(() => buildUserProfile(skinTestAnswers), [skinTestAnswers]);
-  const catalogProducts = useMemo(() => getSeedCatalogProducts(), []);
-
   const loadFeed = async ({ silent = false }: { silent?: boolean } = {}) => {
     try {
       if (!silent) setLoading(true);
@@ -133,7 +133,7 @@ export function CommunityPage({
     { value: 'questions', label: 'Questions', icon: <MessageCircle className="w-4 h-4" /> }
   ];
 
-  const buildAttachment = (product: SeedCatalogProduct): ProductAttachment => {
+  const buildAttachment = (product: CatalogProduct): ProductAttachment => {
     const recommendation = scoreProduct(toEngineProduct(product), ingredientMap, userProfile);
     const explanation = explainProduct(toEngineProduct(product), ingredientMap, userProfile);
     return {
@@ -225,7 +225,7 @@ export function CommunityPage({
     }
   };
 
-  const handleAddProductToDraft = (product: SeedCatalogProduct) => {
+  const handleAddProductToDraft = (product: CatalogProduct) => {
     if (selectedProducts.some((selected) => selected.productId === product.id)) return;
     const next = [...selectedProducts, buildAttachment(product)];
     setSelectedProducts(next.slice(0, 3));

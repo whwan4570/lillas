@@ -17,6 +17,7 @@ import type { SkinTestAnswers } from './types';
 import { buildUserProfile, type UserProfile } from '../lib/recommendationEngine';
 import {
   ApiError,
+  getCatalogProducts,
   getMe,
   getRecentProducts,
   getSavedProducts,
@@ -27,7 +28,8 @@ import {
   saveSkinTest,
   setSavedProducts as apiSetSavedProducts,
   updateMe,
-  type AuthUser
+  type AuthUser,
+  type CatalogProduct
 } from '../lib/backendApi';
 
 const SAVED_PRODUCTS_KEY = 'lillasy_saved_products';
@@ -88,6 +90,7 @@ export default function App() {
     return window.localStorage.getItem(AUTH_TOKEN_KEY);
   });
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalDefaultMode, setAuthModalDefaultMode] = useState<'login' | 'signup'>('login');
   const [authModalError, setAuthModalError] = useState<string | null>(null);
@@ -273,6 +276,22 @@ export default function App() {
     window.history.replaceState({}, '', cleanUrl);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogProducts(300)
+      .then((result) => {
+        if (cancelled) return;
+        setCatalogProducts(Array.isArray(result.products) ? result.products : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCatalogProducts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const recordRecent = (productId: number) => {
     setRecentProductIds((prev) => {
       const next = [productId, ...prev.filter((id) => id !== productId)].slice(0, 20);
@@ -376,7 +395,7 @@ export default function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
-        return <LandingPage onNavigate={setCurrentPage} />;
+        return <LandingPage onNavigate={setCurrentPage} catalogProducts={catalogProducts} />;
       case 'skin-test':
         return <SkinTestPage onNavigate={setCurrentPage} onComplete={handleSkinTestComplete} />;
       case 'recommendations':
@@ -389,6 +408,7 @@ export default function App() {
             onSelectProduct={handleSelectProduct}
             savedProductIds={savedProductIds}
             onToggleSaved={handleToggleSaved}
+            catalogProducts={catalogProducts}
           />
         );
       case 'product-detail':
@@ -400,10 +420,17 @@ export default function App() {
             isSaved={savedProductIds.includes(selectedProductId)}
             onToggleSaved={handleToggleSaved}
             onSelectProduct={handleSelectProduct}
+            catalogProducts={catalogProducts}
           />
         );
       case 'comparison':
-        return <ComparisonPage onNavigate={setCurrentPage} selectedProductId={selectedProductId} />;
+        return (
+          <ComparisonPage
+            onNavigate={setCurrentPage}
+            selectedProductId={selectedProductId}
+            catalogProducts={catalogProducts}
+          />
+        );
       case 'community':
         return (
           <CommunityPage
@@ -413,6 +440,7 @@ export default function App() {
             authToken={authToken}
             authUser={authUser}
             onRequireLogin={(onSuccess) => openAuthModal('login', onSuccess)}
+            catalogProducts={catalogProducts}
           />
         );
       case 'following-manage':
@@ -440,6 +468,7 @@ export default function App() {
               setIsProfileModalOpen(true);
             }}
             onOpenAdmin={() => setCurrentPage('admin')}
+            catalogProducts={catalogProducts}
           />
         );
       case 'admin':
@@ -450,7 +479,7 @@ export default function App() {
           />
         );
       default:
-        return <LandingPage onNavigate={setCurrentPage} />;
+        return <LandingPage onNavigate={setCurrentPage} catalogProducts={catalogProducts} />;
     }
   };
 
@@ -470,6 +499,7 @@ export default function App() {
         onLogin={() => openAuthModal('login')}
         onLogout={handleLogout}
         onSelectProduct={handleSelectProduct}
+        catalogProducts={catalogProducts}
       />
       <EmailVerificationBanner
         authToken={authToken}

@@ -1,14 +1,15 @@
 import { Star, ExternalLink, ShoppingBag, TrendingDown, Check, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getSeedCatalogProducts } from '../../../data/catalogSeed';
+import type { CatalogProduct } from '../../../lib/backendApi';
 
 interface ComparisonPageProps {
   onNavigate: (page: string) => void;
   selectedProductId: number;
+  catalogProducts: CatalogProduct[];
 }
 
-export function ComparisonPage({ onNavigate, selectedProductId }: ComparisonPageProps) {
-  const selected = getSeedCatalogProducts().find((product) => product.id === selectedProductId);
+export function ComparisonPage({ onNavigate, selectedProductId, catalogProducts }: ComparisonPageProps) {
+  const selected = catalogProducts.find((product) => product.id === selectedProductId);
   const product = {
     name: selected?.name ?? 'Hydrating Essence',
     brand: selected?.brand ?? 'Glow Lab'

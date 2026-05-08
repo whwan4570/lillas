@@ -2,7 +2,7 @@ import { Search, User, Heart, Menu, X, LogOut, ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ImageWithFallback } from './ImageWithFallback';
-import { getSeedCatalogProducts, type SeedCatalogProduct } from '../../data/catalogSeed';
+import type { CatalogProduct } from '../../lib/backendApi';
 
 interface NavigationProps {
   onNavigate: (page: string) => void;
@@ -11,6 +11,7 @@ interface NavigationProps {
   onLogin: () => void;
   onLogout: () => void;
   onSelectProduct: (productId: number, targetPage?: string) => void;
+  catalogProducts: CatalogProduct[];
 }
 
 export function Navigation({
@@ -19,7 +20,8 @@ export function Navigation({
   isLoggedIn,
   onLogin,
   onLogout,
-  onSelectProduct
+  onSelectProduct,
+  catalogProducts
 }: NavigationProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,11 +40,11 @@ export function Navigation({
     { label: 'Compare', page: 'comparison' }
   ];
 
-  const catalog = useMemo(() => getSeedCatalogProducts(), []);
+  const catalog = useMemo(() => catalogProducts, [catalogProducts]);
 
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return [] as SeedCatalogProduct[];
+    if (!q) return [] as CatalogProduct[];
     return catalog
       .filter((p) => {
         const hay = `${p.name} ${p.brand} ${p.categoryLabel} ${p.keyIngredients.join(' ')} ${p.benefits.join(' ')}`.toLowerCase();
@@ -80,7 +82,7 @@ export function Navigation({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [searchOpen]);
 
-  const runSelect = (product: SeedCatalogProduct) => {
+  const runSelect = (product: CatalogProduct) => {
     setSearchQuery('');
     setSearchOpen(false);
     setMobileMenuOpen(false);
@@ -155,7 +157,7 @@ export function Navigation({
                       </div>
                     </div>
                     <div className="text-xs text-primary font-medium whitespace-nowrap">
-                      ${product.price}
+                      {product.price != null ? `$${product.price}` : 'See price'}
                     </div>
                   </button>
                 ))}

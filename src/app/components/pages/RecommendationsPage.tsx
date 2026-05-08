@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ImageWithFallback } from '../ImageWithFallback';
-import { getSeedCatalogProducts, type SeedCatalogProduct } from '../../../data/catalogSeed';
 import type { SkinTestAnswers } from '../../types';
 import {
   explainProduct,
@@ -21,6 +20,7 @@ import {
   type Product,
   type UserProfile
 } from '../../../lib/recommendationEngine';
+import type { CatalogProduct } from '../../../lib/backendApi';
 
 interface RecommendationsPageProps {
   onNavigate: (page: string) => void;
@@ -29,9 +29,10 @@ interface RecommendationsPageProps {
   onSelectProduct: (productId: number, targetPage?: string) => void;
   savedProductIds: number[];
   onToggleSaved: (productId: number) => void;
+  catalogProducts: CatalogProduct[];
 }
 
-function toEngineProduct(product: SeedCatalogProduct): Product {
+function toEngineProduct(product: CatalogProduct): Product {
   const ingredients = [...product.keyIngredients, ...product.cautionIngredients].map((v) =>
     v.toLowerCase()
   );
@@ -56,7 +57,8 @@ export function RecommendationsPage({
   userProfile,
   onSelectProduct,
   savedProductIds,
-  onToggleSaved
+  onToggleSaved,
+  catalogProducts
 }: RecommendationsPageProps) {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('match');
@@ -65,12 +67,12 @@ export function RecommendationsPage({
 
   const products = useMemo(
     () =>
-      getSeedCatalogProducts().map((product) => ({
+      catalogProducts.map((product) => ({
         ...product,
         recommendation: scoreProduct(toEngineProduct(product), ingredientMap, userProfile),
         explanation: explainProduct(toEngineProduct(product), ingredientMap, userProfile)
       })),
-    [userProfile]
+    [catalogProducts, userProfile]
   );
 
   const categories = useMemo(() => {
@@ -119,7 +121,7 @@ export function RecommendationsPage({
     return Math.max(0, Math.min(100, relative));
   };
 
-  const formatFromPrice = (product: SeedCatalogProduct) => {
+  const formatFromPrice = (product: CatalogProduct) => {
     if (product.sites.length === 0) {
       return { label: 'See retailers', sub: null as string | null };
     }
@@ -248,7 +250,7 @@ export function RecommendationsPage({
                     <div onClick={() => onSelectProduct(product.id)} className="cursor-pointer">
                       <div className="aspect-square overflow-hidden bg-muted relative">
                         <ImageWithFallback
-                          src={product.image}
+                          src={product.image ?? undefined}
                           alt={product.name}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />

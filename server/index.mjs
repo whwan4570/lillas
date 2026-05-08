@@ -68,6 +68,9 @@ import {
 const DEFAULT_AVATAR =
   'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=100&h=100&fit=crop';
 const pipelineRepo = createPrismaProductRepo(prisma);
+const DEFAULT_CATALOG_RATING = 4.4;
+const DEFAULT_CATALOG_REVIEWS = 1200;
+const CAUTION_KEYWORDS = ['fragrance', 'alcohol', 'essential oil', 'linalool', 'limonene'];
 
 function getAuthUser(req, db) {
   const header = req.headers.authorization ?? '';
@@ -166,6 +169,115 @@ function sanitizePage(rawPage) {
   return allowed.has(page) ? page : 'dashboard';
 }
 
+function toCategoryLabel(value) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ');
+  if (!normalized) return 'Skincare';
+  return normalized
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function normalizeRetailerLabel(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return 'Retailer';
+  if (raw === 'brand_official') return 'Brand Official';
+  return raw
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function pickImageUrl(row) {
+  if (row.imageUrl) return row.imageUrl;
+  for (const source of row.sources ?? []) {
+    if (source.imageUrl) return source.imageUrl;
+  }
+  return null;
+}
+
+function toCatalogSites({ offers = [], sources = [], fallbackPrice = null }) {
+  const fromOffers = offers
+    .map((offer) => {
+      const price = Number(offer.priceAmount);
+      if (!Number.isFinite(price) || price <= 0) return null;
+      return {
+        name: normalizeRetailerLabel(offer.retailer),
+        price: Number(price.toFixed(2)),
+        rating: DEFAULT_CATALOG_RATING
+      };
+    })
+    .filter(Boolean);
+  if (fromOffers.length > 0) return fromOffers;
+
+  const dedup = new Map();
+  for (const source of sources) {
+    const price = Number(source.priceAmount);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const name = normalizeRetailerLabel(source.retailer);
+    if (!dedup.has(name) || dedup.get(name).price > price) {
+      dedup.set(name, {
+        name,
+        price: Number(price.toFixed(2)),
+        rating: DEFAULT_CATALOG_RATING
+      });
+    }
+  }
+  const fromSources = Array.from(dedup.values());
+  if (fromSources.length > 0) return fromSources;
+
+  if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
+    return [{ name: 'Retailer', price: Number(fallbackPrice.toFixed(2)), rating: DEFAULT_CATALOG_RATING }];
+  }
+  return [];
+}
+
+function toCatalogProductDto(row) {
+  const ingredientNames = (row.ingredients ?? [])
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((entry) => entry.ingredient?.canonicalName)
+    .filter(Boolean);
+  const uniqueIngredients = Array.from(new Set(ingredientNames));
+  const keyIngredients = uniqueIngredients.slice(0, 4);
+  const cautionIngredients = uniqueIngredients.filter((name) =>
+    CAUTION_KEYWORDS.some((keyword) => String(name).toLowerCase().includes(keyword))
+  );
+  const category = row.category ?? 'skincare';
+  const categoryLabel = toCategoryLabel(category);
+  const sites = toCatalogSites({
+    offers: row.offers ?? [],
+    sources: row.sources ?? [],
+    fallbackPrice: null
+  });
+  const lowestPrice = sites.length > 0 ? Math.min(...sites.map((site) => site.price)) : null;
+  const rating = DEFAULT_CATALOG_RATING;
+  const reviews = DEFAULT_CATALOG_REVIEWS;
+
+  return {
+    id: row.id,
+    sourceId: row.slug,
+    name: row.canonicalName,
+    brand: row.canonicalBrand,
+    price: lowestPrice,
+    rating,
+    reviews,
+    matchScore: Math.round((rating / 5) * 100),
+    image: pickImageUrl(row),
+    category,
+    categoryLabel,
+    keyIngredients,
+    benefits: [],
+    cautionIngredients,
+    sites
+  };
+}
+
 async function exchangeGoogleCodeForTokens(code) {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
@@ -209,6 +321,29 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'OPTIONS') return json(res, 200, { ok: true });
   if (url.pathname === '/api/health') return json(res, 200, { ok: true });
+
+  if (req.method === 'GET' && url.pathname === '/api/catalog/products') {
+    const requestedLimit = Number(url.searchParams.get('limit') ?? 200);
+    const limit = Math.max(1, Math.min(1000, Number.isFinite(requestedLimit) ? requestedLimit : 200));
+    const includeDraft = String(url.searchParams.get('includeDraft') ?? '').toLowerCase() === 'true';
+    const allowedStatuses = includeDraft
+      ? ['active', 'comparison_only', 'draft']
+      : ['active', 'comparison_only'];
+    const rows = await prisma.product.findMany({
+      where: { status: { in: allowedStatuses } },
+      orderBy: { updatedAt: 'desc' },
+      take: limit,
+      include: {
+        offers: true,
+        sources: true,
+        ingredients: {
+          include: { ingredient: true }
+        }
+      }
+    });
+    const products = rows.map(toCatalogProductDto);
+    return json(res, 200, { products });
+  }
 
   const db = await readDb();
 
