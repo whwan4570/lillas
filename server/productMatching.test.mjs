@@ -242,8 +242,16 @@ describe('sizeGroupKey', () => {
   });
 
   it('uses oz fallback when ml is missing', () => {
-    expect(sizeGroupKey({ sizeOz: 1.7 })).toBe('1.5oz');
-    expect(sizeGroupKey({ sizeOz: 8 })).toBe('8oz');
+    // oz is converted to ml first so the same canonical product always
+    // shares one slug regardless of which units the source provides.
+    expect(sizeGroupKey({ sizeOz: 1.7 })).toBe('50ml');
+    // 8 fl oz = 236.588 ml → snaps to nearest 25 ml bucket above 100 ml.
+    expect(sizeGroupKey({ sizeOz: 8 })).toBe('225ml');
+  });
+
+  it('produces the same slug whether ml or oz is provided for the same SKU', () => {
+    expect(sizeGroupKey({ sizeMl: 50, sizeOz: 1.7 })).toBe(sizeGroupKey({ sizeOz: 1.7 }));
+    expect(sizeGroupKey({ sizeMl: 50 })).toBe(sizeGroupKey({ sizeOz: 1.7 }));
   });
 
   it('returns nosize when no size info is available', () => {

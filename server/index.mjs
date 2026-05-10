@@ -251,18 +251,27 @@ function pickImageUrl(row) {
 }
 
 function toCatalogSites({ offers = [], sources = [], fallbackPrice = null }) {
-  const fromOffers = offers
-    .map((offer) => {
-      const price = Number(offer.priceAmount);
-      if (!Number.isFinite(price) || price <= 0) return null;
-      return {
-        name: normalizeRetailerLabel(offer.retailer),
+  // Group by retailer and prefer the most recently fetched offer so a fresh
+  // bookmarklet/PA-API ingest replaces stale seed data instead of stacking
+  // up as duplicate "Amazon" rows in the comparison view.
+  const offerByRetailer = new Map();
+  for (const offer of offers) {
+    const price = Number(offer.priceAmount);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const label = normalizeRetailerLabel(offer.retailer);
+    const fetchedAt = offer.fetchedAt ? new Date(offer.fetchedAt).getTime() : 0;
+    const current = offerByRetailer.get(label);
+    if (!current || fetchedAt > current.fetchedAt) {
+      offerByRetailer.set(label, {
+        name: label,
         price: Number(price.toFixed(2)),
         rating: DEFAULT_CATALOG_RATING,
-        url: offer.url ?? null
-      };
-    })
-    .filter(Boolean);
+        url: offer.url ?? null,
+        fetchedAt
+      });
+    }
+  }
+  const fromOffers = Array.from(offerByRetailer.values()).map(({ fetchedAt, ...rest }) => rest);
   if (fromOffers.length > 0) return fromOffers;
 
   const dedup = new Map();

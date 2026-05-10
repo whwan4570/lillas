@@ -422,7 +422,17 @@ function bucketOz(oz) {
 }
 
 export function sizeGroupKey({ sizeMl, sizeOz, sizeRaw } = {}) {
-  const ml = bucketMl(sizeMl);
+  // Always prefer ml so the same canonical product gets the same slug
+  // regardless of which retailer reports ml or oz first. When only oz is
+  // available, derive ml (1 fl oz ≈ 29.5735 ml) before bucketing so a
+  // payload with sizeOz=1.7 collapses into the same bucket as a payload
+  // that already has sizeMl=50.
+  const sizeOzNum = Number(sizeOz);
+  const derivedMl =
+    sizeMl == null && Number.isFinite(sizeOzNum) && sizeOzNum > 0
+      ? sizeOzNum * 29.5735
+      : sizeMl;
+  const ml = bucketMl(derivedMl);
   const oz = bucketOz(sizeOz);
   const variant = detectSizeVariant(sizeRaw);
   let base;

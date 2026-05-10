@@ -160,17 +160,38 @@ async function ensureProduct({ repo, amazonSource, enrichment, now }) {
   const slug = canonicalProductKey({ brand, name, sizeMl, sizeOz, sizeRaw });
   const existing = await repo.findProductBySlug(slug);
   if (existing) {
-    if (enrichment && (existing.canonicalBrand !== brand || existing.canonicalName !== name)) {
-      return repo.updateProduct(existing.id, {
-        canonicalBrand: brand || existing.canonicalBrand,
-        canonicalName: name || existing.canonicalName,
-        category: enrichment.category ?? existing.category,
-        sizeMl: enrichment.sizeMl ?? existing.sizeMl,
-        sizeOz: enrichment.sizeOz ?? existing.sizeOz,
-        imageUrl: existing.imageUrl ?? enrichment.imageUrl ?? amazonSource.imageUrl
-      });
-    }
-    return existing;
+    // Re-ingestion path: always refresh image/category/size from the latest
+    // payload so a fresh Amazon scrape (or PA API fetch) overrides earlier
+    // placeholder data. Amazon is the primary source for image/category;
+    // size still defers to enrichment when available because retailer
+    // metadata is usually more accurate than free-form Amazon titles.
+    const refreshedImageUrl =
+      amazonSource.imageUrl ?? enrichment?.imageUrl ?? existing.imageUrl;
+    const refreshedCategory =
+      enrichment?.category ?? amazonSource.category ?? existing.category;
+    const refreshedSizeMl = enrichment?.sizeMl ?? amazonSource.sizeMl ?? existing.sizeMl;
+    const refreshedSizeOz = enrichment?.sizeOz ?? amazonSource.sizeOz ?? existing.sizeOz;
+    const refreshedBrand = brand || existing.canonicalBrand;
+    const refreshedName = name || existing.canonicalName;
+
+    const needsUpdate =
+      refreshedImageUrl !== existing.imageUrl ||
+      refreshedCategory !== existing.category ||
+      refreshedSizeMl !== existing.sizeMl ||
+      refreshedSizeOz !== existing.sizeOz ||
+      refreshedBrand !== existing.canonicalBrand ||
+      refreshedName !== existing.canonicalName;
+
+    if (!needsUpdate) return existing;
+
+    return repo.updateProduct(existing.id, {
+      canonicalBrand: refreshedBrand,
+      canonicalName: refreshedName,
+      category: refreshedCategory,
+      sizeMl: refreshedSizeMl,
+      sizeOz: refreshedSizeOz,
+      imageUrl: refreshedImageUrl
+    });
   }
   return repo.createProduct({
     slug,

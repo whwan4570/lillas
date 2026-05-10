@@ -45,12 +45,14 @@ export function ProductDetailPage({
       </div>
     );
   }
-  const productSites = [
-    { name: 'Sephora', price: 42, rating: 4.8, reviews: 1523, stock: true },
-    { name: 'Ulta', price: 40, rating: 4.7, reviews: 892, stock: true },
-    { name: 'Amazon', price: 38, rating: 4.9, reviews: 432, stock: false },
-    { name: 'Olive Young', price: 39, rating: 4.7, reviews: 671, stock: true }
-  ];
+  const productSites = (product.sites ?? []).map((site) => ({
+    name: site.name,
+    price: site.price,
+    rating: site.rating,
+    reviews: product.reviews,
+    stock: true,
+    url: site.url ?? null
+  }));
   const engineProduct: Product = {
     id: String(product.id),
     name: product.name,
@@ -153,6 +155,11 @@ export function ProductDetailPage({
             <div className="pt-6 border-t border-border">
               <div className="text-2xl mb-4" style={{ fontFamily: 'var(--font-serif)' }}>Available at:</div>
               <div className="space-y-3">
+                {productSites.length === 0 && (
+                  <div className="p-4 bg-muted/30 border border-border rounded-xl text-sm text-muted-foreground">
+                    No retailer offers available yet.
+                  </div>
+                )}
                 {productSites.map((site) => (
                   <div key={site.name} className="flex items-center justify-between p-4 bg-card border border-border rounded-xl hover:border-primary/30 transition-all">
                     <div>
@@ -164,13 +171,22 @@ export function ProductDetailPage({
                     </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <div className="text-2xl text-primary" style={{ fontFamily: 'var(--font-serif)' }}>${site.price}</div>
-                        <div className={`text-xs ${site.stock ? 'text-green-600' : 'text-destructive'}`}>{site.stock ? 'In Stock' : 'Out of Stock'}</div>
+                        <div className="text-2xl text-primary" style={{ fontFamily: 'var(--font-serif)' }}>${site.price.toFixed(2)}</div>
+                        <div className="text-xs text-green-600">In Stock</div>
                       </div>
-                      <button disabled={!site.stock} className="px-6 py-3 bg-primary text-primary-foreground rounded-full hover:bg-forest transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                      <a
+                        href={site.url ?? undefined}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-disabled={!site.url}
+                        onClick={(event) => {
+                          if (!site.url) event.preventDefault();
+                        }}
+                        className="px-6 py-3 bg-primary text-primary-foreground rounded-full hover:bg-forest transition-all flex items-center gap-2 aria-[disabled=true]:opacity-50 aria-[disabled=true]:cursor-not-allowed"
+                      >
                         <ShoppingBag className="w-4 h-4" />
                         Buy
-                      </button>
+                      </a>
                     </div>
                   </div>
                 ))}
