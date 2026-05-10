@@ -25,6 +25,8 @@ import {
   toPipelineResultDto
 } from './productPipelineReprocessor.mjs';
 import { startProductPipelineScheduler } from './productPipelineScheduler.mjs';
+import { refreshAllAmazonProducts } from './amazonRefreshRunner.mjs';
+import { startAmazonRefreshScheduler } from './amazonRefreshScheduler.mjs';
 import {
   amazonItemToProductSource,
   brandOfficialToProductSource,
@@ -55,6 +57,7 @@ import {
   parseOrThrow,
   amazonAsinFetchSchema,
   amazonBatchIngestSchema,
+  amazonRefreshSchema,
   matchCandidateApproveSchema,
   passwordResetRequestSchema,
   passwordResetSchema,
@@ -968,6 +971,25 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/admin/amazon/refresh') {
+    const authUser = getAuthUser(req, db);
+    if (!authUser) return json(res, 401, { error: 'Unauthorized' });
+    try {
+      const body = await parseBody(req).catch(() => ({}));
+      const opts = parseOrThrow(amazonRefreshSchema, body ?? {});
+      const summary = await refreshAllAmazonProducts({
+        limit: opts.limit,
+        delayMs: opts.delayMs,
+        onlyLinked: opts.onlyLinked,
+        trigger: 'admin',
+        logger: console
+      });
+      return json(res, 200, summary);
+    } catch (error) {
+      return badRequest(res, error);
+    }
+  }
+
   if (req.method === 'POST' && /^\/api\/admin\/pipeline\/match-candidates\/\d+\/approve$/.test(url.pathname)) {
     const authUser = getAuthUser(req, db);
     if (!authUser) return json(res, 401, { error: 'Unauthorized' });
@@ -1207,4 +1229,5 @@ server.listen(config.port, async () => {
   console.log(`lillasy backend listening on http://localhost:${config.port}`);
   startSephoraScheduler({ logger: console });
   startProductPipelineScheduler({ logger: console });
+  startAmazonRefreshScheduler({ logger: console });
 });

@@ -225,6 +225,15 @@ export const matchCandidateApproveSchema = z.object({
   candidateLimit: z.coerce.number().int().min(1).max(300).default(60)
 });
 
+// Manual trigger for the daily Amazon refresh fallback. All fields are
+// optional; defaults match the scheduler so the admin "Run now" button does
+// the same work as one tick of the background loop.
+export const amazonRefreshSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(25),
+  delayMs: z.coerce.number().int().min(0).max(60000).default(4000),
+  onlyLinked: z.coerce.boolean().default(true)
+});
+
 // Used by the PA API admin endpoint - the caller only needs to send ASINs;
 // the backend resolves brand/title/image/price/size via PA API and feeds
 // them into the existing batch ingestion logic.
