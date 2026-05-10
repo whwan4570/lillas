@@ -258,7 +258,8 @@ function toCatalogSites({ offers = [], sources = [], fallbackPrice = null }) {
       return {
         name: normalizeRetailerLabel(offer.retailer),
         price: Number(price.toFixed(2)),
-        rating: DEFAULT_CATALOG_RATING
+        rating: DEFAULT_CATALOG_RATING,
+        url: offer.url ?? null
       };
     })
     .filter(Boolean);
@@ -273,7 +274,8 @@ function toCatalogSites({ offers = [], sources = [], fallbackPrice = null }) {
       dedup.set(name, {
         name,
         price: Number(price.toFixed(2)),
-        rating: DEFAULT_CATALOG_RATING
+        rating: DEFAULT_CATALOG_RATING,
+        url: source.sourceUrl ?? null
       });
     }
   }
@@ -281,7 +283,14 @@ function toCatalogSites({ offers = [], sources = [], fallbackPrice = null }) {
   if (fromSources.length > 0) return fromSources;
 
   if (Number.isFinite(fallbackPrice) && fallbackPrice > 0) {
-    return [{ name: 'Retailer', price: Number(fallbackPrice.toFixed(2)), rating: DEFAULT_CATALOG_RATING }];
+    return [
+      {
+        name: 'Retailer',
+        price: Number(fallbackPrice.toFixed(2)),
+        rating: DEFAULT_CATALOG_RATING,
+        url: null
+      }
+    ];
   }
   return [];
 }

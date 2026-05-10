@@ -1,9 +1,15 @@
 import { config } from './config.mjs';
 
+function isAmazonOrigin(origin) {
+  return /^https:\/\/([a-z0-9-]+\.)?amazon\.[a-z.]+$/i.test(origin);
+}
+
 function resolveAllowedOrigin(req) {
   const requestOrigin = String(req?.headers?.origin ?? '').trim();
   if (!requestOrigin) return config.frontendOrigin;
   if (config.frontendOrigins.includes(requestOrigin)) return requestOrigin;
+  // Bookmarklet support: allow requests initiated from Amazon product pages.
+  if (isAmazonOrigin(requestOrigin)) return requestOrigin;
   return config.frontendOrigin;
 }
 

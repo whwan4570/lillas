@@ -15,83 +15,35 @@ export function ComparisonPage({ onNavigate, selectedProductId, catalogProducts 
     brand: selected?.brand ?? 'Glow Lab'
   };
 
-  const sites = [
-    {
-      name: 'Sephora',
-      logo: '🛍️',
-      price: 42,
-      originalPrice: 42,
-      rating: 4.8,
-      reviews: 1523,
-      stock: true,
-      shipping: 'Free shipping over $50',
-      delivery: '2-3 business days',
-      returns: '60 days',
-      benefits: ['Beauty Insider Points', 'Free samples', 'Gift wrapping'],
-      lastUpdated: '2 hours ago'
-    },
-    {
-      name: 'Ulta',
-      logo: '💄',
-      price: 40,
-      originalPrice: 42,
-      rating: 4.7,
-      reviews: 892,
-      stock: true,
-      shipping: 'Free shipping over $35',
-      delivery: '3-5 business days',
-      returns: '60 days',
-      benefits: ['Ultamate Rewards', '5% off with card'],
-      lastUpdated: '1 hour ago',
-      discount: 5
-    },
-    {
-      name: 'Amazon',
-      logo: '📦',
-      price: 38,
-      originalPrice: 42,
-      rating: 4.9,
-      reviews: 432,
-      stock: false,
-      shipping: 'Free Prime shipping',
-      delivery: '1-2 business days (Prime)',
-      returns: '30 days',
-      benefits: ['Prime eligible', 'Subscribe & Save 5%'],
-      lastUpdated: '30 minutes ago',
-      discount: 10
-    },
-    {
-      name: 'Dermstore',
-      logo: '🏥',
-      price: 41,
-      originalPrice: 42,
-      rating: 4.8,
-      reviews: 267,
-      stock: true,
-      shipping: 'Free shipping over $50',
-      delivery: '3-4 business days',
-      returns: '30 days',
-      benefits: ['Expert advice', 'Loyalty rewards'],
-      lastUpdated: '4 hours ago'
-    },
-    {
-      name: 'Olive Young',
-      logo: '🫒',
-      price: 39,
-      originalPrice: 42,
-      rating: 4.7,
-      reviews: 671,
-      stock: true,
-      shipping: 'Free shipping over $60',
-      delivery: '4-6 business days',
-      returns: '30 days',
-      benefits: ['K-beauty picks', 'Member coupons'],
-      lastUpdated: '50 minutes ago',
-      discount: 7
-    }
-  ];
+  const emojiByRetailer: Record<string, string> = {
+    amazon: '📦',
+    sephora: '🛍️',
+    ulta: '💄',
+    'brand official': '🏷️'
+  };
+  const sites =
+    selected?.sites?.map((site) => {
+      const lower = site.name.toLowerCase();
+      const logo =
+        Object.entries(emojiByRetailer).find(([key]) => lower.includes(key))?.[1] ?? '🛒';
+      return {
+        name: site.name,
+        logo,
+        price: site.price,
+        originalPrice: site.price,
+        rating: site.rating,
+        reviews: selected.reviews ?? 0,
+        stock: true,
+        shipping: 'See retailer checkout',
+        delivery: 'Varies by retailer',
+        returns: 'See retailer policy',
+        benefits: [],
+        lastUpdated: 'Recently synced',
+        url: site.url ?? null
+      };
+    }) ?? [];
 
-  const lowestPrice = Math.min(...sites.map((s) => s.price));
+  const lowestPrice = sites.length > 0 ? Math.min(...sites.map((s) => s.price)) : 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-card to-muted/30 py-12">
@@ -129,7 +81,8 @@ export function ComparisonPage({ onNavigate, selectedProductId, catalogProducts 
               ${lowestPrice}
             </div>
             <p className="text-sm text-muted-foreground">
-              Save up to ${Math.max(...sites.map((s) => s.price)) - lowestPrice} compared to highest
+              Save up to $
+              {(sites.length > 0 ? Math.max(...sites.map((s) => s.price)) - lowestPrice : 0).toFixed(2)} compared to highest
               price
             </p>
           </div>
@@ -152,6 +105,11 @@ export function ComparisonPage({ onNavigate, selectedProductId, catalogProducts 
         </div>
 
         <div className="space-y-6">
+          {sites.length === 0 && (
+            <div className="bg-card rounded-2xl p-6 border border-border text-sm text-muted-foreground">
+              No retailer offers available yet for this product.
+            </div>
+          )}
           {sites.map((site, index) => (
             <motion.div
               key={index}
@@ -226,17 +184,32 @@ export function ComparisonPage({ onNavigate, selectedProductId, catalogProducts 
                 </div>
 
                 <div className="lg:col-span-3 flex flex-col gap-3">
-                  <button
-                    disabled={!site.stock}
-                    className="w-full px-6 py-3 bg-primary text-primary-foreground rounded-full hover:bg-forest transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  <a
+                    href={site.url ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-disabled={!site.stock || !site.url}
+                    onClick={(event) => {
+                      if (!site.stock || !site.url) event.preventDefault();
+                    }}
+                    className="w-full px-6 py-3 bg-primary text-primary-foreground rounded-full hover:bg-forest transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 aria-[disabled=true]:opacity-50 aria-[disabled=true]:cursor-not-allowed"
                   >
                     <ShoppingBag className="w-4 h-4" />
                     Buy Now
-                  </button>
-                  <button className="w-full px-6 py-3 border-2 border-primary text-primary rounded-full hover:bg-primary/5 transition-all flex items-center justify-center gap-2">
+                  </a>
+                  <a
+                    href={site.url ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-disabled={!site.url}
+                    onClick={(event) => {
+                      if (!site.url) event.preventDefault();
+                    }}
+                    className="w-full px-6 py-3 border-2 border-primary text-primary rounded-full hover:bg-primary/5 transition-all flex items-center justify-center gap-2 aria-[disabled=true]:opacity-50 aria-[disabled=true]:cursor-not-allowed"
+                  >
                     <ExternalLink className="w-4 h-4" />
                     Visit Site
-                  </button>
+                  </a>
                 </div>
               </div>
 

@@ -34,6 +34,7 @@ export interface CatalogProductSite {
   name: string;
   price: number;
   rating: number;
+  url?: string | null;
 }
 
 export interface CatalogProduct {

@@ -109,6 +109,24 @@
 
   Full schema reference: `docs/sephora-schema-v1.md`.
 
+  ## Amazon bookmarklet (one-click ingest)
+
+  You can ingest the current Amazon product page with one click using a
+  bookmarklet. This is useful when PA API keys are not configured yet.
+
+  1. Start backend: `pnpm dev:server`
+  2. Build bookmarklet text: `pnpm bookmarklet:build`
+  3. Add a browser bookmark named `Lillas Ingest` and paste the generated
+     `javascript:...` string as the bookmark URL.
+  4. Open any Amazon product page and click the bookmark.
+
+  The bookmarklet extracts ASIN/title/brand/image/price/size/category and posts
+  to `/api/admin/amazon/ingest-batch`. It also stores the product `url` as the
+  clean `https://.../dp/{ASIN}` (plus optional affiliate `tag=`), so your Buy
+  Now button points to the exact product page.
+
+  Full setup details: `docs/amazon-bookmarklet.md`.
+
   ### Choosing a fetcher (Akamai bypass)
 
   Sephora's product pages are protected by Akamai BotManager — direct Node
